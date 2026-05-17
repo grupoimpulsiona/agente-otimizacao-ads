@@ -20,11 +20,11 @@ class Settings(BaseSettings):
     meta_access_token: str = ""
     meta_ad_account_ids: str = ""  # CSV: "act_123,act_456"
 
-    # WhatsApp (Z-API)
-    zapi_instance_id: str = ""
-    zapi_token: str = ""
-    zapi_client_token: str = ""
-    zapi_phone_number: str = ""  # destinatário: "5511999999999"
+    # WhatsApp (Evolution API)
+    evolution_api_url: str = ""           # ex: https://evo.seudominio.com.br
+    evolution_api_key: str = ""           # apikey da instância
+    evolution_instance: str = ""          # nome da instância
+    evolution_group_jid: str = "120363423820098780@g.us"  # grupo de notificações
 
     # Guardrails
     max_bid_change_pct: float = 0.20

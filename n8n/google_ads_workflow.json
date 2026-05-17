@@ -12,127 +12,166 @@
           ]
         }
       },
-      "id": "schedule-trigger",
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
       "name": "Trigger Diário 7h (Seg-Sex)",
       "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
       "position": [240, 300]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "http://python-api:8000/optimize/google-ads",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "x-api-key",
-              "value": "={{ $env.API_SECRET }}"
+              "value": "={{ $vars.API_SECRET }}"
             }
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            { "name": "customer_id", "value": "={{ $env.GOOGLE_ADS_CUSTOMER_ID }}" },
-            { "name": "date_range", "value": "LAST_7_DAYS" },
-            { "name": "dry_run", "value": false }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"customer_id\": \"{{ $vars.GOOGLE_ADS_CUSTOMER_ID }}\",\n  \"date_range\": \"LAST_7_DAYS\",\n  \"dry_run\": false\n}",
         "options": {
           "timeout": 300000,
-          "response": { "response": { "fullResponse": false } }
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
         }
       },
-      "id": "call-google-ads-agent",
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
       "name": "Rodar Agente Google Ads",
       "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [480, 300]
     },
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.status }}",
-              "operation": "equal",
-              "value2": "ok"
+              "id": "cond-001",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
-      "id": "check-status",
-      "name": "Verificar Status",
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Sucesso ou Erro?",
       "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
       "position": [720, 300]
     },
     {
       "parameters": {
-        "phoneNumber": "={{ $env.ZAPI_PHONE }}",
-        "message": "=✅ *Agente Google Ads — Concluído*\n\nAções: {{ $json.actions }}\nModo: {{ $json.dry_run ? 'DRY-RUN' : 'PRODUÇÃO' }}\n\n{{ $json.summary }}"
+        "resource": "message",
+        "operation": "sendText",
+        "instanceName": "impulsionanumber3",
+        "remoteJid": "120363423820098780@g.us",
+        "messageText": "=✅ *Agente Google Ads — Concluído*\n\n📊 Ações executadas: {{ $('Rodar Agente Google Ads').item.json.actions }}\n🔧 Modo: {{ $('Rodar Agente Google Ads').item.json.dry_run ? 'DRY-RUN' : 'PRODUÇÃO' }}\n\n{{ $('Rodar Agente Google Ads').item.json.summary }}"
       },
-      "id": "whatsapp-success",
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
       "name": "WhatsApp — Sucesso",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [960, 200],
-      "notes": "Configure via HTTP Request para Z-API (ver documentação)"
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [960, 180],
+      "credentials": {
+        "evolutionApi": {
+          "name": "impulsionanumber3"
+        }
+      }
     },
     {
       "parameters": {
-        "phoneNumber": "={{ $env.ZAPI_PHONE }}",
-        "message": "=🚨 *ERRO — Agente Google Ads*\n\nStatus: {{ $json.status }}\nErro: {{ $json.error }}\n\nVerifique os logs."
+        "resource": "message",
+        "operation": "sendText",
+        "instanceName": "impulsionanumber3",
+        "remoteJid": "120363423820098780@g.us",
+        "messageText": "=🚨 *ERRO — Agente Google Ads*\n\nStatus: {{ $('Rodar Agente Google Ads').item.json.status }}\nMotivo: {{ $('Rodar Agente Google Ads').item.json.error }}\n\n_Verifique os logs da API._"
       },
-      "id": "whatsapp-error",
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
       "name": "WhatsApp — Erro",
-      "type": "n8n-nodes-base.httpRequest",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
       "position": [960, 420],
-      "notes": "Configure via HTTP Request para Z-API"
+      "credentials": {
+        "evolutionApi": {
+          "name": "impulsionanumber3"
+        }
+      }
     },
     {
-      "parameters": {
-        "message": "={{ $json.error || $json }}"
-      },
-      "id": "error-trigger",
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0001-0001-000000000006",
       "name": "Error Trigger Global",
       "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
       "position": [240, 560]
     },
     {
       "parameters": {
-        "message": "=🚨 *FALHA CRÍTICA — Workflow Google Ads*\n\nErro: {{ $json.error.message }}\nNode: {{ $json.executionId }}\n\nVerifique o N8N imediatamente."
+        "resource": "message",
+        "operation": "sendText",
+        "instanceName": "impulsionanumber3",
+        "remoteJid": "120363423820098780@g.us",
+        "messageText": "=🚨 *FALHA CRÍTICA — Workflow Google Ads*\n\nErro: {{ $json.error.message }}\nExecução: {{ $json.executionId }}\n\nVerifique o N8N imediatamente."
       },
-      "id": "whatsapp-critical",
+      "id": "a1b2c3d4-0001-0001-0001-000000000007",
       "name": "WhatsApp — Falha Crítica",
-      "type": "n8n-nodes-base.httpRequest",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
       "position": [480, 560],
-      "notes": "Configure via HTTP Request para Z-API"
+      "credentials": {
+        "evolutionApi": {
+          "name": "impulsionanumber3"
+        }
+      }
     }
   ],
   "connections": {
     "Trigger Diário 7h (Seg-Sex)": {
-      "main": [[{ "node": "Rodar Agente Google Ads", "type": "main", "index": 0 }]]
+      "main": [
+        [{ "node": "Rodar Agente Google Ads", "type": "main", "index": 0 }]
+      ]
     },
     "Rodar Agente Google Ads": {
-      "main": [[{ "node": "Verificar Status", "type": "main", "index": 0 }]]
+      "main": [
+        [{ "node": "Sucesso ou Erro?", "type": "main", "index": 0 }]
+      ]
     },
-    "Verificar Status": {
+    "Sucesso ou Erro?": {
       "main": [
         [{ "node": "WhatsApp — Sucesso", "type": "main", "index": 0 }],
         [{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]
       ]
     },
     "Error Trigger Global": {
-      "main": [[{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]]
+      "main": [
+        [{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]
+      ]
     }
   },
   "active": false,
   "settings": {
-    "errorWorkflow": "error-trigger",
     "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all",
     "executionTimeout": 360,
     "timezone": "America/Sao_Paulo"
   },
-  "tags": ["ads", "automacao", "google-ads"]
+  "tags": ["ads", "google-ads", "automacao"]
 }

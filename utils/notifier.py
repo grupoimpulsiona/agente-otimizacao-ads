@@ -5,10 +5,10 @@ from utils.logger import get_logger
 log = get_logger("notifier")
 
 
-def _zapi_send(instance_id: str, token: str, client_token: str, phone: str, message: str) -> bool:
-    url = f"https://api.z-api.io/instances/{instance_id}/token/{token}/send-text"
-    headers = {"Client-Token": client_token, "Content-Type": "application/json"}
-    payload = {"phone": phone, "message": message}
+def _evolution_send(base_url: str, api_key: str, instance: str, jid: str, message: str) -> bool:
+    url = f"{base_url.rstrip('/')}/message/sendText/{instance}"
+    headers = {"apikey": api_key, "Content-Type": "application/json"}
+    payload = {"number": jid, "text": message}
 
     for attempt in range(1, 4):
         try:
@@ -17,25 +17,25 @@ def _zapi_send(instance_id: str, token: str, client_token: str, phone: str, mess
             return True
         except Exception as e:
             wait = 2 ** attempt
-            log.warning(f"Z-API tentativa {attempt} falhou: {e}. Aguardando {wait}s...")
+            log.warning(f"Evolution API tentativa {attempt} falhou: {e}. Aguardando {wait}s...")
             time.sleep(wait)
 
-    log.error("Z-API: todas as tentativas falharam.")
+    log.error("Evolution API: todas as tentativas falharam.")
     return False
 
 
 def send_whatsapp(message: str) -> bool:
     from config.settings import settings
 
-    if not all([settings.zapi_instance_id, settings.zapi_token, settings.zapi_phone_number]):
-        log.warning("WhatsApp não configurado. Pulando notificação.")
+    if not all([settings.evolution_api_url, settings.evolution_api_key, settings.evolution_instance]):
+        log.warning("Evolution API não configurada. Pulando notificação.")
         return False
 
-    return _zapi_send(
-        settings.zapi_instance_id,
-        settings.zapi_token,
-        settings.zapi_client_token,
-        settings.zapi_phone_number,
+    return _evolution_send(
+        settings.evolution_api_url,
+        settings.evolution_api_key,
+        settings.evolution_instance,
+        settings.evolution_group_jid,
         message,
     )
 
@@ -51,7 +51,7 @@ def notify_run_result(platform: str, summary: str, actions: list[dict], dry_run:
 
     if actions:
         lines.append(f"*Ações realizadas ({len(actions)}):*")
-        for a in actions[:10]:  # limita preview a 10
+        for a in actions[:10]:
             lines.append(f"  • {a.get('description', str(a))}")
         if len(actions) > 10:
             lines.append(f"  ... e mais {len(actions) - 10} ações no log.")
@@ -62,12 +62,11 @@ def notify_run_result(platform: str, summary: str, actions: list[dict], dry_run:
 
 
 def notify_error(platform: str, error: str) -> None:
-    message = (
+    send_whatsapp(
         f"🚨 *ERRO — Agente {platform}*\n\n"
         f"{error}\n\n"
         f"_Verifique os logs em /logs/agent.log_"
     )
-    send_whatsapp(message)
 
 
 def notify_anomaly(platform: str, anomalies: list[str]) -> None:
