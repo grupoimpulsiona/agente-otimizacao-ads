@@ -1,0 +1,182 @@
+{
+  "name": "Agente Meta Ads — Otimização Diária",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Trigger Diário 7h30 (Seg-Sex)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/optimize/meta-ads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "ad_account_id", "value": "={{ $env.META_AD_ACCOUNT_ID }}" },
+            { "name": "date_preset", "value": "last_7d" },
+            { "name": "dry_run", "value": false }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "call-meta-agent",
+      "name": "Rodar Agente Meta Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "ok"
+            }
+          ]
+        }
+      },
+      "id": "check-status",
+      "name": "Verificar Status",
+      "type": "n8n-nodes-base.if",
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.z-api.io/instances/{{ $env.ZAPI_INSTANCE_ID }}/token/{{ $env.ZAPI_TOKEN }}/send-text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Client-Token", "value": "={{ $env.ZAPI_CLIENT_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "phone", "value": "={{ $env.ZAPI_PHONE }}" },
+            {
+              "name": "message",
+              "value": "=✅ *Agente Meta Ads — Concluído*\n\nAções: {{ $json.actions }}\nModo: {{ $json.dry_run ? 'DRY-RUN' : 'PRODUÇÃO' }}\n\n{{ $json.summary }}"
+            }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "whatsapp-success",
+      "name": "WhatsApp — Sucesso",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.z-api.io/instances/{{ $env.ZAPI_INSTANCE_ID }}/token/{{ $env.ZAPI_TOKEN }}/send-text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Client-Token", "value": "={{ $env.ZAPI_CLIENT_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "phone", "value": "={{ $env.ZAPI_PHONE }}" },
+            {
+              "name": "message",
+              "value": "=🚨 *ERRO — Agente Meta Ads*\n\nStatus: {{ $json.status }}\nErro: {{ $json.error }}"
+            }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "whatsapp-error",
+      "name": "WhatsApp — Erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 420]
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger Global",
+      "type": "n8n-nodes-base.errorTrigger",
+      "position": [240, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.z-api.io/instances/{{ $env.ZAPI_INSTANCE_ID }}/token/{{ $env.ZAPI_TOKEN }}/send-text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Client-Token", "value": "={{ $env.ZAPI_CLIENT_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "phone", "value": "={{ $env.ZAPI_PHONE }}" },
+            {
+              "name": "message",
+              "value": "=🚨 *FALHA CRÍTICA — Workflow Meta Ads*\n\nErro: {{ $json.error.message }}\n\nVerifique o N8N imediatamente."
+            }
+          ]
+        }
+      },
+      "id": "whatsapp-critical",
+      "name": "WhatsApp — Falha Crítica",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 560]
+    }
+  ],
+  "connections": {
+    "Trigger Diário 7h30 (Seg-Sex)": {
+      "main": [[{ "node": "Rodar Agente Meta Ads", "type": "main", "index": 0 }]]
+    },
+    "Rodar Agente Meta Ads": {
+      "main": [[{ "node": "Verificar Status", "type": "main", "index": 0 }]]
+    },
+    "Verificar Status": {
+      "main": [
+        [{ "node": "WhatsApp — Sucesso", "type": "main", "index": 0 }],
+        [{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]
+      ]
+    },
+    "Error Trigger Global": {
+      "main": [[{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "executionTimeout": 360,
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["ads", "automacao", "meta-ads"]
+}

@@ -1,0 +1,138 @@
+{
+  "name": "Agente Google Ads — Otimização Diária",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Trigger Diário 7h (Seg-Sex)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/optimize/google-ads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "customer_id", "value": "={{ $env.GOOGLE_ADS_CUSTOMER_ID }}" },
+            { "name": "date_range", "value": "LAST_7_DAYS" },
+            { "name": "dry_run", "value": false }
+          ]
+        },
+        "options": {
+          "timeout": 300000,
+          "response": { "response": { "fullResponse": false } }
+        }
+      },
+      "id": "call-google-ads-agent",
+      "name": "Rodar Agente Google Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "ok"
+            }
+          ]
+        }
+      },
+      "id": "check-status",
+      "name": "Verificar Status",
+      "type": "n8n-nodes-base.if",
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "phoneNumber": "={{ $env.ZAPI_PHONE }}",
+        "message": "=✅ *Agente Google Ads — Concluído*\n\nAções: {{ $json.actions }}\nModo: {{ $json.dry_run ? 'DRY-RUN' : 'PRODUÇÃO' }}\n\n{{ $json.summary }}"
+      },
+      "id": "whatsapp-success",
+      "name": "WhatsApp — Sucesso",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 200],
+      "notes": "Configure via HTTP Request para Z-API (ver documentação)"
+    },
+    {
+      "parameters": {
+        "phoneNumber": "={{ $env.ZAPI_PHONE }}",
+        "message": "=🚨 *ERRO — Agente Google Ads*\n\nStatus: {{ $json.status }}\nErro: {{ $json.error }}\n\nVerifique os logs."
+      },
+      "id": "whatsapp-error",
+      "name": "WhatsApp — Erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [960, 420],
+      "notes": "Configure via HTTP Request para Z-API"
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.error || $json }}"
+      },
+      "id": "error-trigger",
+      "name": "Error Trigger Global",
+      "type": "n8n-nodes-base.errorTrigger",
+      "position": [240, 560]
+    },
+    {
+      "parameters": {
+        "message": "=🚨 *FALHA CRÍTICA — Workflow Google Ads*\n\nErro: {{ $json.error.message }}\nNode: {{ $json.executionId }}\n\nVerifique o N8N imediatamente."
+      },
+      "id": "whatsapp-critical",
+      "name": "WhatsApp — Falha Crítica",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 560],
+      "notes": "Configure via HTTP Request para Z-API"
+    }
+  ],
+  "connections": {
+    "Trigger Diário 7h (Seg-Sex)": {
+      "main": [[{ "node": "Rodar Agente Google Ads", "type": "main", "index": 0 }]]
+    },
+    "Rodar Agente Google Ads": {
+      "main": [[{ "node": "Verificar Status", "type": "main", "index": 0 }]]
+    },
+    "Verificar Status": {
+      "main": [
+        [{ "node": "WhatsApp — Sucesso", "type": "main", "index": 0 }],
+        [{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]
+      ]
+    },
+    "Error Trigger Global": {
+      "main": [[{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "errorWorkflow": "error-trigger",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "executionTimeout": 360,
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["ads", "automacao", "google-ads"]
+}
