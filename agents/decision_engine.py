@@ -123,8 +123,15 @@ def run_decision_loop(
                     "is_error": True,
                 })
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+        clean_content = [
+            block for block in response.content
+            if not (hasattr(block, "text") and block.text == "")
+        ]
+        if clean_content:
+            messages.append({"role": "assistant", "content": clean_content})
+
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
 
     log.warning(f"[{platform}] Limite de iterações atingido.")
     return actions_taken, "Limite de iterações atingido. Verifique os logs."
