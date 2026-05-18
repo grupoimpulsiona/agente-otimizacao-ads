@@ -117,22 +117,41 @@ function SummarySection({ summary }: { summary: string }) {
   )
 }
 
-function AccountSection({ account, checkedActions, onToggle, disabled }: {
+function AccountSection({ account, checkedActions, onToggle, onSelectAll, onDeselectAll, disabled }: {
   account: AccountResult
   checkedActions: Set<number>
   onToggle: (idx: number) => void
+  onSelectAll: () => void
+  onDeselectAll: () => void
   disabled: boolean
 }) {
+  const total = account.actions_detail.length
+  const allChecked = checkedActions.size === total
+  const noneChecked = checkedActions.size === 0
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
         <div>
           <h3 className="font-semibold text-gray-900">{account.account_name || account.customer_id || account.ad_account_id}</h3>
           <p className="text-xs text-gray-400 mt-0.5">{account.actions_count} otimizações identificadas</p>
         </div>
-        {account.actions_count > 0 && (
+        {total > 0 && !disabled && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full">
+              {checkedActions.size} de {total} selecionadas
+            </span>
+            <button
+              onClick={allChecked ? onDeselectAll : onSelectAll}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline underline-offset-2 whitespace-nowrap"
+            >
+              {allChecked ? 'Desmarcar todas' : noneChecked ? 'Marcar todas' : 'Marcar todas'}
+            </button>
+          </div>
+        )}
+        {total > 0 && disabled && (
           <span className="text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full">
-            {checkedActions.size} de {account.actions_detail.length} selecionadas
+            {checkedActions.size} de {total} selecionadas
           </span>
         )}
       </div>
@@ -212,6 +231,26 @@ export function ApprovalDetail() {
     if (next.has(actionIdx)) next.delete(actionIdx)
     else next.add(actionIdx)
     setCheckedMap(prev => ({ ...prev, [accountIdx]: next }))
+  }
+
+  const selectAllAccount = (accountIdx: number, total: number) => {
+    setCheckedMap(prev => ({ ...prev, [accountIdx]: new Set(Array.from({ length: total }, (_, i) => i)) }))
+  }
+
+  const deselectAllAccount = (accountIdx: number) => {
+    setCheckedMap(prev => ({ ...prev, [accountIdx]: new Set() }))
+  }
+
+  const selectAllGlobal = (accs: AccountResult[]) => {
+    const map: Record<number, Set<number>> = {}
+    accs.forEach((acc, ai) => { map[ai] = new Set(acc.actions_detail.map((_, i) => i)) })
+    setCheckedMap(map)
+  }
+
+  const deselectAllGlobal = (accs: AccountResult[]) => {
+    const map: Record<number, Set<number>> = {}
+    accs.forEach((_, ai) => { map[ai] = new Set() })
+    setCheckedMap(map)
   }
 
   // Constrói o mapa account_id → índices selecionados para execução seletiva
@@ -376,6 +415,8 @@ export function ApprovalDetail() {
           account={account}
           checkedActions={getChecked(ai, account.actions_detail.length)}
           onToggle={(idx) => toggleAction(ai, idx, account.actions_detail.length)}
+          onSelectAll={() => selectAllAccount(ai, account.actions_detail.length)}
+          onDeselectAll={() => deselectAllAccount(ai)}
           disabled={isAlreadyDone || isMutating}
         />
       ))}
@@ -383,16 +424,38 @@ export function ApprovalDetail() {
       {/* Bottom approve bar */}
       {!isAlreadyDone && (
         <div className="sticky bottom-6 bg-white border border-gray-200 rounded-2xl shadow-lg p-4 flex items-center justify-between gap-4 flex-wrap">
-          <p className="text-sm text-gray-600">
-            <span className="font-semibold text-gray-900">
-              {accounts.reduce((sum, acc, ai) => sum + getChecked(ai, acc.actions_detail.length).size, 0)}
-            </span>
-            {' '}de{' '}
-            <span className="font-semibold text-gray-900">
-              {accounts.reduce((sum, acc) => sum + acc.actions_detail.length, 0)}
-            </span>
-            {' '}otimizações selecionadas
-          </p>
+          {/* Contagem + atalhos globais */}
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-gray-600">
+              <span className="font-semibold text-gray-900">
+                {accounts.reduce((sum, acc, ai) => sum + getChecked(ai, acc.actions_detail.length).size, 0)}
+              </span>
+              {' '}de{' '}
+              <span className="font-semibold text-gray-900">
+                {accounts.reduce((sum, acc) => sum + acc.actions_detail.length, 0)}
+              </span>
+              {' '}selecionadas
+            </p>
+            <div className="flex gap-2 text-xs font-medium">
+              <button
+                onClick={() => selectAllGlobal(accounts)}
+                disabled={isMutating}
+                className="text-indigo-600 hover:text-indigo-800 underline underline-offset-2 disabled:opacity-40"
+              >
+                Marcar todas
+              </button>
+              <span className="text-gray-300">|</span>
+              <button
+                onClick={() => deselectAllGlobal(accounts)}
+                disabled={isMutating}
+                className="text-gray-500 hover:text-gray-700 underline underline-offset-2 disabled:opacity-40"
+              >
+                Desmarcar todas
+              </button>
+            </div>
+          </div>
+
+          {/* Botões de ação */}
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => rejectMutation.mutate()}
