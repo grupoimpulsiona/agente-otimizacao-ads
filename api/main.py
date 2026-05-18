@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config.settings import settings
@@ -21,6 +22,15 @@ from utils.logger import get_logger
 log = get_logger("api")
 
 app = FastAPI(title="Ads Optimization Agent API", version="2.0.0")
+
+# CORS — permite o dashboard frontend acessar a API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Em produção, restringir ao domínio do dashboard
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Autenticação simples via header
 API_SECRET = os.getenv("API_SECRET", "mude-esta-chave-no-env")
@@ -277,3 +287,127 @@ def optimize_all(x_api_key: Optional[str] = Header(None)):
     for aid in settings.meta_account_ids:
         results["meta_ads"].append({"ad_account_id": aid, **meta_ads_agent.run(aid)})
     return results
+
+
+# ─── Dashboard API — Gerenciamento de sessões ─────────────────────────────────
+
+@app.get("/sessions")
+def list_sessions(x_api_key: Optional[str] = Header(None)):
+    """Lista todas as sessões (pendentes e executadas) para o dashboard."""
+    _auth(x_api_key)
+    sessions = []
+    for session_id, session in _pending_sessions.items():
+        total_actions = sum(
+            len(acc.get("actions_detail", [])) for acc in session.get("accounts", [])
+        )
+        sessions.append({
+            "session_id": session_id,
+            "platform": session["platform"],
+            "created_at": session["created_at"],
+            "executed": session.get("executed", False),
+            "executed_at": session.get("executed_at"),
+            "rejected": session.get("rejected", False),
+            "rejected_at": session.get("rejected_at"),
+            "total_actions": total_actions,
+            "accounts_count": len(session.get("accounts", [])),
+            "accounts": [
+                {
+                    "id": acc.get("customer_id") or acc.get("ad_account_id", ""),
+                    "name": acc.get("account_name", ""),
+                    "status": acc.get("status", "ok"),
+                    "actions_count": len(acc.get("actions_detail", [])),
+                }
+                for acc in session.get("accounts", [])
+            ],
+        })
+    # Ordena mais recente primeiro
+    sessions.sort(key=lambda s: s["created_at"], reverse=True)
+    return {"sessions": sessions, "total": len(sessions)}
+
+
+@app.get("/sessions/{session_id}")
+def get_session(session_id: str, x_api_key: Optional[str] = Header(None)):
+    """Retorna detalhes completos de uma sessão para o dashboard."""
+    _auth(x_api_key)
+    session = _pending_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
+    return {
+        "session_id": session_id,
+        "platform": session["platform"],
+        "created_at": session["created_at"],
+        "executed": session.get("executed", False),
+        "executed_at": session.get("executed_at"),
+        "rejected": session.get("rejected", False),
+        "rejected_at": session.get("rejected_at"),
+        "accounts": session.get("accounts", []),
+    }
+
+
+@app.post("/sessions/{session_id}/reject")
+def reject_session(session_id: str, x_api_key: Optional[str] = Header(None)):
+    """Rejeita uma sessão pendente sem executar as ações."""
+    _auth(x_api_key)
+    session = _pending_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
+    if session.get("executed"):
+        raise HTTPException(status_code=409, detail="Sessão já foi executada e não pode ser rejeitada.")
+    if session.get("rejected"):
+        raise HTTPException(status_code=409, detail="Sessão já foi rejeitada.")
+    session["rejected"] = True
+    session["rejected_at"] = datetime.now().isoformat()
+    log.info(f"[REJECT] Sessão {session_id} rejeitada pelo dashboard.")
+    return {"status": "rejected", "session_id": session_id}
+
+
+@app.post("/analyze/trigger")
+def trigger_analysis(x_api_key: Optional[str] = Header(None)):
+    """Dispara análise para todas as plataformas configuradas. Usado pelo dashboard."""
+    _auth(x_api_key)
+    results = {}
+    if settings.google_customer_ids:
+        from agents import google_ads_agent
+        original_dry_run = settings.dry_run
+        settings.dry_run = True
+        try:
+            accounts_results = []
+            for cid in settings.google_customer_ids:
+                result = google_ads_agent.run(cid, "LAST_7_DAYS")
+                accounts_results.append({"customer_id": cid, **result})
+            session_id = str(uuid.uuid4())[:8].upper()
+            _pending_sessions[session_id] = {
+                "platform": "google_ads",
+                "accounts": accounts_results,
+                "customer_ids": settings.google_customer_ids,
+                "date_range": "LAST_7_DAYS",
+                "created_at": datetime.now().isoformat(),
+                "approved": False,
+                "executed": False,
+            }
+            results["google_ads"] = {"session_id": session_id, "accounts": len(accounts_results)}
+        finally:
+            settings.dry_run = original_dry_run
+    if settings.meta_account_ids:
+        from agents import meta_ads_agent
+        original_dry_run = settings.dry_run
+        settings.dry_run = True
+        try:
+            accounts_results = []
+            for aid in settings.meta_account_ids:
+                result = meta_ads_agent.run(aid, "last_7d")
+                accounts_results.append({"ad_account_id": aid, **result})
+            session_id = str(uuid.uuid4())[:8].upper()
+            _pending_sessions[session_id] = {
+                "platform": "meta_ads",
+                "accounts": accounts_results,
+                "account_ids": settings.meta_account_ids,
+                "date_preset": "last_7d",
+                "created_at": datetime.now().isoformat(),
+                "approved": False,
+                "executed": False,
+            }
+            results["meta_ads"] = {"session_id": session_id, "accounts": len(accounts_results)}
+        finally:
+            settings.dry_run = original_dry_run
+    return {"status": "ok", "triggered": results}
