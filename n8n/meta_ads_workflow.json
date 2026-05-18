@@ -21,7 +21,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://python-api:8000/optimize/meta-ads",
+        "url": "http://31.97.170.137:8000/optimize/meta-ads",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

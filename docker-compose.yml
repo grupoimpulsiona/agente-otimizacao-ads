@@ -20,40 +20,9 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── N8N Self-Hosted ────────────────────────────────────────────────────────
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5678
-      - GENERIC_TIMEZONE=America/Sao_Paulo
-      - N8N_LOG_LEVEL=info
-      # Variáveis acessíveis nos workflows como $env.VARIAVEL
-      - API_SECRET=${API_SECRET}
-      - EVOLUTION_API_URL=${EVOLUTION_API_URL}
-      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
-      - EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE}
-      - EVOLUTION_GROUP_JID=${EVOLUTION_GROUP_JID}
-      - GOOGLE_ADS_CUSTOMER_ID=${GOOGLE_ADS_CUSTOMER_IDS}
-      - META_AD_ACCOUNT_ID=${META_AD_ACCOUNT_IDS}
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./n8n:/home/node/workflows:ro  # workflows prontos para importar
-    networks:
-      - ads-network
-    depends_on:
-      python-api:
-        condition: service_healthy
+  # N8N não é gerenciado aqui — use o N8N já instalado na VPS.
+  # Os workflows ficam em ./n8n/ para importação manual.
 
 networks:
   ads-network:
     driver: bridge
-
-volumes:
-  n8n_data:
