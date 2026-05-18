@@ -1,0 +1,94 @@
+{
+  "name": "Log Otimizações — Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "log-otimizacao",
+        "responseMode": "onReceived",
+        "responseData": "noData",
+        "options": {}
+      },
+      "id": "sheets-001",
+      "name": "Webhook — Receber Execução",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "log-otimizacao"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recebe o payload do backend e transforma em linhas para o Sheets\nconst body = $input.item.json.body || $input.item.json;\nconst accounts = body.accounts || [];\nconst executedAt = body.executed_at || new Date().toISOString();\nconst date = executedAt.split('T')[0];\nconst time = executedAt.split('T')[1] ? executedAt.split('T')[1].substring(0, 8) : '';\nconst platform = body.platform === 'google_ads' ? 'Google Ads' : 'Meta Ads';\n\nconst rows = accounts.map(acc => {\n  const actions = (acc.actions_detail || []).map(a => a.description || '').join(' | ');\n  return {\n    json: {\n      'Data':       date,\n      'Hora':       time,\n      'Sessão':     body.session_id || '',\n      'Plataforma': platform,\n      'Conta':      acc.account_name || acc.customer_id || acc.ad_account_id || '',\n      'Ações':      acc.actions_count || 0,\n      'Detalhes':   actions || 'Sem otimizações'\n    }\n  };\n});\n\n// Se não tem contas, cria linha indicando execução sem resultados\nif (rows.length === 0) {\n  rows.push({\n    json: {\n      'Data': date, 'Hora': time,\n      'Sessão': body.session_id || '',\n      'Plataforma': platform,\n      'Conta': '-', 'Ações': 0, 'Detalhes': 'Sem contas'\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "id": "sheets-002",
+      "name": "Preparar Linhas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "COLE_AQUI_O_ID_DA_PLANILHA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Otimizações",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data":       "={{ $json['Data'] }}",
+            "Hora":       "={{ $json['Hora'] }}",
+            "Sessão":     "={{ $json['Sessão'] }}",
+            "Plataforma": "={{ $json['Plataforma'] }}",
+            "Conta":      "={{ $json['Conta'] }}",
+            "Ações":      "={{ $json['Ações'] }}",
+            "Detalhes":   "={{ $json['Detalhes'] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Data",       "displayName": "Data",       "required": false, "defaultMatch": false, "type": "string" },
+            { "id": "Hora",       "displayName": "Hora",       "required": false, "defaultMatch": false, "type": "string" },
+            { "id": "Sessão",     "displayName": "Sessão",     "required": false, "defaultMatch": false, "type": "string" },
+            { "id": "Plataforma", "displayName": "Plataforma", "required": false, "defaultMatch": false, "type": "string" },
+            { "id": "Conta",      "displayName": "Conta",      "required": false, "defaultMatch": false, "type": "string" },
+            { "id": "Ações",      "displayName": "Ações",      "required": false, "defaultMatch": false, "type": "number" },
+            { "id": "Detalhes",   "displayName": "Detalhes",   "required": false, "defaultMatch": false, "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sheets-003",
+      "name": "Google Sheets — Registrar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [760, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CONFIGURAR_CREDENCIAL_GOOGLE_NO_N8N",
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Receber Execução": {
+      "main": [[{ "node": "Preparar Linhas", "type": "main", "index": 0 }]]
+    },
+    "Preparar Linhas": {
+      "main": [[{ "node": "Google Sheets — Registrar", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["ads", "sheets", "log"]
+}
