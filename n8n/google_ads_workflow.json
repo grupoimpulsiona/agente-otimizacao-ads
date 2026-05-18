@@ -12,8 +12,8 @@
           ]
         }
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000001",
-      "name": "Trigger Diário 7h (Seg-Sex)",
+      "id": "gads-0001",
+      "name": "Trigger 7h (Seg-Sex)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [240, 300]
@@ -27,23 +27,18 @@
           "parameters": [
             {
               "name": "x-api-key",
-              "value": "={{ $vars.API_SECRET }}"
+              "value": "impulsiona-agente-ads-2026-seguro"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"customer_id\": \"{{ $vars.GOOGLE_ADS_CUSTOMER_ID }}\",\n  \"date_range\": \"LAST_7_DAYS\",\n  \"dry_run\": false\n}",
+        "jsonBody": "{\n  \"date_range\": \"LAST_7_DAYS\"\n}",
         "options": {
-          "timeout": 300000,
-          "response": {
-            "response": {
-              "fullResponse": false
-            }
-          }
+          "timeout": 600000
         }
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "id": "gads-0002",
       "name": "Rodar Agente Google Ads",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -52,26 +47,19 @@
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
             {
               "id": "cond-001",
               "leftValue": "={{ $json.status }}",
               "rightValue": "ok",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "operator": { "type": "string", "operation": "equals" }
             }
           ],
           "combinator": "and"
         }
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "id": "gads-0003",
       "name": "Sucesso ou Erro?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -79,45 +67,51 @@
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendText",
-        "instanceName": "impulsionanumber3",
-        "remoteJid": "120363423820098780@g.us",
-        "messageText": "=✅ *Agente Google Ads — Concluído*\n\n📊 Ações executadas: {{ $('Rodar Agente Google Ads').item.json.actions }}\n🔧 Modo: {{ $('Rodar Agente Google Ads').item.json.dry_run ? 'DRY-RUN' : 'PRODUÇÃO' }}\n\n{{ $('Rodar Agente Google Ads').item.json.summary }}"
+        "method": "POST",
+        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "1EC47F97E146-4487-8575-875E43229803" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Google Ads — Otimização Concluída*\\n\\n📊 Contas processadas: {{ $('Rodar Agente Google Ads').item.json.accounts.length }}\\n🔧 Modo: {{ $('Rodar Agente Google Ads').item.json.dry_run ? 'DRY-RUN ✋' : 'PRODUÇÃO 🚀' }}\\n\\n_Verifique os logs para detalhes das ações tomadas._\"\\n}",
+        "options": {}
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "id": "gads-0004",
       "name": "WhatsApp — Sucesso",
-      "type": "n8n-nodes-evolution-api.evolutionApi",
-      "typeVersion": 1,
-      "position": [960, 180],
-      "credentials": {
-        "evolutionApi": {
-          "name": "impulsionanumber3"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 180]
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendText",
-        "instanceName": "impulsionanumber3",
-        "remoteJid": "120363423820098780@g.us",
-        "messageText": "=🚨 *ERRO — Agente Google Ads*\n\nStatus: {{ $('Rodar Agente Google Ads').item.json.status }}\nMotivo: {{ $('Rodar Agente Google Ads').item.json.error }}\n\n_Verifique os logs da API._"
+        "method": "POST",
+        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "1EC47F97E146-4487-8575-875E43229803" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *ERRO — Agente Google Ads*\\n\\nStatus: {{ $('Rodar Agente Google Ads').item.json.status }}\\nDetalhe: {{ $('Rodar Agente Google Ads').item.json.error }}\\n\\n_Verifique os logs da API._\"\n}",
+        "options": {}
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "id": "gads-0005",
       "name": "WhatsApp — Erro",
-      "type": "n8n-nodes-evolution-api.evolutionApi",
-      "typeVersion": 1,
-      "position": [960, 420],
-      "credentials": {
-        "evolutionApi": {
-          "name": "impulsionanumber3"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 420]
     },
     {
       "parameters": {},
-      "id": "a1b2c3d4-0001-0001-0001-000000000006",
+      "id": "gads-0006",
       "name": "Error Trigger Global",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
@@ -125,34 +119,33 @@
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendText",
-        "instanceName": "impulsionanumber3",
-        "remoteJid": "120363423820098780@g.us",
-        "messageText": "=🚨 *FALHA CRÍTICA — Workflow Google Ads*\n\nErro: {{ $json.error.message }}\nExecução: {{ $json.executionId }}\n\nVerifique o N8N imediatamente."
+        "method": "POST",
+        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "1EC47F97E146-4487-8575-875E43229803" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA CRÍTICA — Workflow Google Ads*\\n\\nErro: {{ $json.error.message }}\\nExecução: {{ $json.executionId }}\\n\\nVerifique o N8N imediatamente.\"\n}",
+        "options": {}
       },
-      "id": "a1b2c3d4-0001-0001-0001-000000000007",
+      "id": "gads-0007",
       "name": "WhatsApp — Falha Crítica",
-      "type": "n8n-nodes-evolution-api.evolutionApi",
-      "typeVersion": 1,
-      "position": [480, 560],
-      "credentials": {
-        "evolutionApi": {
-          "name": "impulsionanumber3"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 560]
     }
   ],
   "connections": {
-    "Trigger Diário 7h (Seg-Sex)": {
-      "main": [
-        [{ "node": "Rodar Agente Google Ads", "type": "main", "index": 0 }]
-      ]
+    "Trigger 7h (Seg-Sex)": {
+      "main": [[{ "node": "Rodar Agente Google Ads", "type": "main", "index": 0 }]]
     },
     "Rodar Agente Google Ads": {
-      "main": [
-        [{ "node": "Sucesso ou Erro?", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Sucesso ou Erro?", "type": "main", "index": 0 }]]
     },
     "Sucesso ou Erro?": {
       "main": [
@@ -161,16 +154,14 @@
       ]
     },
     "Error Trigger Global": {
-      "main": [
-        [{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]]
     }
   },
   "active": false,
   "settings": {
     "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all",
-    "executionTimeout": 360,
+    "executionTimeout": 660,
     "timezone": "America/Sao_Paulo"
   },
   "tags": ["ads", "google-ads", "automacao"]
