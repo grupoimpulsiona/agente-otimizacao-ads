@@ -129,6 +129,18 @@ def _get_client() -> GoogleAdsClient:
     return GoogleAdsClient.load_from_dict(config)
 
 
+_OPTIMIZATION_TOOLS = {"pause_keyword", "update_keyword_bid", "add_negative_keyword"}
+
+
+def _get_account_name(client: GoogleAdsClient, customer_id: str) -> str:
+    """Busca o nome descritivo da conta Google Ads."""
+    try:
+        rows = _run_query(client, customer_id, "SELECT customer.descriptive_name FROM customer LIMIT 1")
+        return rows[0].customer.descriptive_name if rows else ""
+    except Exception:
+        return ""
+
+
 def _run_query(client: GoogleAdsClient, customer_id: str, query: str) -> list[dict]:
     """Executa GAQL com retry automático."""
     ga_service = client.get_service("GoogleAdsService")
@@ -358,6 +370,7 @@ def run(customer_id: str, date_range: str = "LAST_7_DAYS") -> dict:
 
     try:
         ads_client = _get_client()
+        account_name = _get_account_name(ads_client, customer_id)
         actions_counter: list = []
         executor = _make_tool_executor(ads_client, actions_counter)
 
@@ -368,11 +381,15 @@ def run(customer_id: str, date_range: str = "LAST_7_DAYS") -> dict:
             tool_executor=executor,
         )
 
-        notify_run_result(PLATFORM, summary, actions, settings.dry_run)
+        # Filtra apenas ações de otimização (exclui consultas de dados)
+        optimization_actions = [a for a in actions if a.get("tool") in _OPTIMIZATION_TOOLS]
+
+        notify_run_result(PLATFORM, summary, optimization_actions, settings.dry_run)
         return {
             "status": "ok",
-            "actions_count": len(actions),
-            "actions_detail": actions,
+            "account_name": account_name,
+            "actions_count": len(optimization_actions),
+            "actions_detail": optimization_actions,
             "summary": summary,
             "dry_run": settings.dry_run,
         }

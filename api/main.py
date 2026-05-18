@@ -35,25 +35,38 @@ def _auth(x_api_key: Optional[str]):
 
 
 def _format_actions_whatsapp(platform: str, accounts: list[dict]) -> str:
-    """Formata a lista de ações propostas em texto legível para WhatsApp."""
-    lines = [f"🤖 *{platform} — Ações Propostas*\n"]
+    """Formata apenas as ações de otimização (não consultas) em texto legível para WhatsApp."""
+    from datetime import date
+    today = date.today().strftime("%d/%m/%Y")
+    lines = [f"🤖 *{platform} — Otimização {today}*\n"]
     total_actions = 0
 
     for acc in accounts:
         account_id = acc.get("customer_id") or acc.get("ad_account_id", "")
+        account_name = acc.get("account_name", "")
+        label = f"*{account_name}*" if account_name else f"*Conta {account_id}*"
+
+        if acc.get("status") == "error":
+            lines.append(f"📋 {label}: ⚠️ erro ao analisar")
+            continue
+
         actions = acc.get("actions_detail", [])
         total_actions += len(actions)
 
         if not actions:
-            lines.append(f"📋 Conta `{account_id}`: nenhuma ação necessária")
+            lines.append(f"📋 {label}: ✅ nenhuma otimização necessária")
             continue
 
-        lines.append(f"\n📋 *Conta {account_id}* ({len(actions)} ação(ões)):")
+        lines.append(f"\n📋 {label} — {len(actions)} otimização(ões):")
         for i, action in enumerate(actions, 1):
-            desc = action.get("description", action.get("tool", "ação"))
+            desc = action.get("description", "ação sem descrição")
             lines.append(f"  {i}. {desc}")
 
-    lines.append(f"\n📊 Total: *{total_actions} ação(ões)* em {len(accounts)} conta(s)")
+    lines.append(
+        f"\n📊 *{total_actions} otimização(ões)* em {len(accounts)} conta(s)"
+        if total_actions > 0
+        else f"\n✅ *Nenhuma otimização necessária hoje* em {len(accounts)} conta(s)"
+    )
     return "\n".join(lines)
 
 

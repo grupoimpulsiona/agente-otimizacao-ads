@@ -24,6 +24,8 @@ PLATFORM = "Meta Ads"
 META_API_VERSION = "v21.0"
 META_BASE = f"https://graph.facebook.com/{META_API_VERSION}"
 
+_OPTIMIZATION_TOOLS = {"pause_ad_set", "pause_ad", "update_ad_set_bid"}
+
 # ─── Tools disponíveis para o Claude ─────────────────────────────────────────
 
 TOOLS_SCHEMA = [
@@ -110,6 +112,15 @@ TOOLS_SCHEMA = [
 
 
 # ─── Chamadas à Meta Marketing API ───────────────────────────────────────────
+
+def _get_account_name(ad_account_id: str) -> str:
+    """Busca o nome da conta Meta Ads."""
+    try:
+        data = _meta_get(ad_account_id, {"fields": "name"})
+        return data.get("name", "")
+    except Exception:
+        return ""
+
 
 def _meta_get(endpoint: str, params: dict) -> dict:
     params["access_token"] = settings.meta_access_token
@@ -301,6 +312,7 @@ def run(ad_account_id: str, date_preset: str = "last_7d") -> dict:
     log.info(f"[Meta Ads] Iniciando agente | conta={ad_account_id} | período={date_preset} | dry_run={settings.dry_run}")
 
     try:
+        account_name = _get_account_name(ad_account_id)
         actions_counter: list = []
         executor = _make_tool_executor(actions_counter)
 
@@ -311,11 +323,15 @@ def run(ad_account_id: str, date_preset: str = "last_7d") -> dict:
             tool_executor=executor,
         )
 
-        notify_run_result(PLATFORM, summary, actions, settings.dry_run)
+        # Filtra apenas ações de otimização (exclui consultas de dados)
+        optimization_actions = [a for a in actions if a.get("tool") in _OPTIMIZATION_TOOLS]
+
+        notify_run_result(PLATFORM, summary, optimization_actions, settings.dry_run)
         return {
             "status": "ok",
-            "actions_count": len(actions),
-            "actions_detail": actions,
+            "account_name": account_name,
+            "actions_count": len(optimization_actions),
+            "actions_detail": optimization_actions,
             "summary": summary,
             "dry_run": settings.dry_run,
         }
