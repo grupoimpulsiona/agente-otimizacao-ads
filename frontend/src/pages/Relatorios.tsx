@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { formatDateTime, platformLabel, platformColor } from '../lib/utils'
 import {
   FileSpreadsheet, ExternalLink, TrendingUp, BarChart2, Zap,
-  Activity, ChevronDown, ChevronUp, CheckCircle, Info
+  Activity, ChevronDown, ChevronUp, CheckCircle, Info, RotateCcw, Loader2
 } from 'lucide-react'
 import type { ReportExecution, ReportAccount } from '../types'
 
@@ -94,7 +94,17 @@ function ActionBadge({ description }: { description: string }) {
 
 function ExecutionRow({ execution }: { execution: ReportExecution }) {
   const [expanded, setExpanded] = useState(false)
+  const [reverted, setReverted] = useState(execution.reverted)
+  const queryClient = useQueryClient()
   const pCfg = platformColor(execution.platform)
+
+  const revertMutation = useMutation({
+    mutationFn: () => api.sessions.revert(execution.session_id),
+    onSuccess: () => {
+      setReverted(true)
+      queryClient.invalidateQueries({ queryKey: ['reports'] })
+    },
+  })
 
   return (
     <div className="border-b border-gray-50 last:border-0">
@@ -129,15 +139,37 @@ function ExecutionRow({ execution }: { execution: ReportExecution }) {
           </p>
         </div>
 
-        {/* Actions count */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Actions count + revert */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           {execution.total_actions > 0 ? (
-            <span className="flex items-center gap-1 text-sm font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-              <Zap className="w-3 h-3" />
-              {execution.total_actions} ações
+            <span className={`flex items-center gap-1 text-sm font-semibold px-2.5 py-1 rounded-full border ${
+              reverted
+                ? 'text-orange-700 bg-orange-50 border-orange-200'
+                : 'text-green-700 bg-green-50 border-green-200'
+            }`}>
+              {reverted ? <RotateCcw className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+              {reverted ? 'Revertido' : `${execution.total_actions} ações`}
             </span>
           ) : (
             <span className="text-xs text-gray-400">Sem ações</span>
+          )}
+          {execution.total_actions > 0 && !reverted && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (window.confirm('Reverter todas as otimizações desta sessão? Keywords pausadas serão reativadas, lances restaurados e negativos removidos.')) {
+                  revertMutation.mutate()
+                }
+              }}
+              disabled={revertMutation.isPending}
+              className="flex items-center gap-1 text-xs font-medium text-orange-600 hover:text-orange-800 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-2.5 py-1 rounded-full disabled:opacity-50 transition-colors"
+              title="Desfazer otimizações aplicadas nesta sessão"
+            >
+              {revertMutation.isPending
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <RotateCcw className="w-3 h-3" />}
+              Reverter
+            </button>
           )}
         </div>
 
@@ -150,6 +182,11 @@ function ExecutionRow({ execution }: { execution: ReportExecution }) {
       {/* Expanded detail */}
       {expanded && (
         <div className="px-6 pb-5 bg-gray-50 border-t border-gray-100">
+          {revertMutation.isError && (
+            <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              Erro ao reverter: {revertMutation.error?.message}
+            </div>
+          )}
           {execution.accounts.map((acc: ReportAccount, ai) => (
             <div key={ai} className="mt-4">
               {/* Account header */}

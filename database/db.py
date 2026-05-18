@@ -243,7 +243,7 @@ def list_executed_with_details(limit: int = 500) -> list[dict]:
     """Retorna todas as sessões executadas com actions_detail completo (para a página de relatórios)."""
     with _conn() as conn:
         rows = conn.execute(
-            """SELECT session_id, platform, created_at, executed_at
+            """SELECT session_id, platform, created_at, executed_at, reverted, reverted_at
                FROM sessions
                WHERE executed=1
                ORDER BY executed_at DESC
@@ -254,6 +254,7 @@ def list_executed_with_details(limit: int = 500) -> list[dict]:
         result = []
         for row in rows:
             d = dict(row)
+            d["reverted"] = bool(d.get("reverted", 0))
             accs = conn.execute(
                 """SELECT account_id, account_name, status,
                           actions_count, actions_detail, summary

@@ -77,6 +77,8 @@ export interface ReportExecution {
   created_at: string
   executed_at: string
   total_actions: number
+  reverted: boolean
+  reverted_at?: string
   accounts: ReportAccount[]
 }
 
