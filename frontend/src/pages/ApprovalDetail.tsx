@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import { platformLabel, platformColor, formatDateTime, getSessionStatus } from '../lib/utils'
 import {
   ArrowLeft, CheckCircle, XCircle, ChevronDown, ChevronUp,
-  Zap, AlertTriangle, Info, CheckSquare, Square, Loader2
+  Zap, AlertTriangle, Info, CheckSquare, Square, Loader2, RotateCcw
 } from 'lucide-react'
 import type { AccountResult, ActionDetail } from '../types'
 
@@ -214,8 +214,21 @@ export function ApprovalDetail() {
     setCheckedMap(prev => ({ ...prev, [accountIdx]: next }))
   }
 
+  // Constrói o mapa account_id → índices selecionados para execução seletiva
+  const buildAccountActions = (accounts: AccountResult[]): Record<string, number[]> => {
+    const result: Record<string, number[]> = {}
+    accounts.forEach((acc, ai) => {
+      const accountId = acc.customer_id || acc.ad_account_id || ''
+      if (!accountId) return
+      const checked = getChecked(ai, acc.actions_detail.length)
+      result[accountId] = Array.from(checked).sort((a, b) => a - b)
+    })
+    return result
+  }
+
   const executeMutation = useMutation({
-    mutationFn: () => api.sessions.execute(sessionId!),
+    mutationFn: (accountActions?: Record<string, number[]>) =>
+      api.sessions.execute(sessionId!, accountActions),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
       queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
@@ -231,6 +244,14 @@ export function ApprovalDetail() {
     },
   })
 
+  const revertMutation = useMutation({
+    mutationFn: () => api.sessions.revert(sessionId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
+    },
+  })
+
   if (isLoading || !session) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -242,7 +263,7 @@ export function ApprovalDetail() {
   const status = getSessionStatus(session)
   const isAlreadyDone = status !== 'pending'
   const platformCfg = platformColor(session.platform)
-  const isMutating = executeMutation.isPending || rejectMutation.isPending
+  const isMutating = executeMutation.isPending || rejectMutation.isPending || revertMutation.isPending
 
   const accounts = session.accounts ?? []
   const initialChecked = initChecked(accounts)
@@ -271,9 +292,9 @@ export function ApprovalDetail() {
             <p className="text-gray-500 text-sm mt-1">Análise gerada {formatDateTime(session.created_at)}</p>
           </div>
 
-          {/* Action buttons */}
+          {/* Action buttons — pending */}
           {!isAlreadyDone && (
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
               <button
                 onClick={() => rejectMutation.mutate()}
                 disabled={isMutating}
@@ -283,31 +304,68 @@ export function ApprovalDetail() {
                 Rejeitar
               </button>
               <button
-                onClick={() => executeMutation.mutate()}
+                onClick={() => executeMutation.mutate(buildAccountActions(accounts))}
+                disabled={isMutating}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors shadow-sm"
+                title="Executa apenas as ações selecionadas (checkboxes)"
+              >
+                {executeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
+                Aplicar Selecionadas
+              </button>
+              <button
+                onClick={() => executeMutation.mutate(undefined)}
                 disabled={isMutating}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+                title="Executa todas as ações propostas pela IA"
               >
                 {executeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                Aprovar e Executar
+                Aplicar Tudo
               </button>
             </div>
           )}
 
+          {/* Status badge + revert — executed/rejected */}
           {isAlreadyDone && (
-            <span className={`text-sm font-medium px-4 py-2 rounded-xl border ${
-              status === 'executed' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'
-            }`}>
-              {status === 'executed' ? '✓ Executado' : '✗ Rejeitado'}
-            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {status === 'executed' && !session.reverted && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('Tem certeza que deseja REVERTER todas as otimizações desta sessão? Esta ação ativará/restaurará os itens que foram pausados/ajustados.')) {
+                      revertMutation.mutate()
+                    }
+                  }}
+                  disabled={isMutating}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-orange-200 text-sm font-medium text-orange-600 hover:bg-orange-50 disabled:opacity-50 transition-colors"
+                >
+                  {revertMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                  Reverter
+                </button>
+              )}
+              <span className={`text-sm font-medium px-4 py-2 rounded-xl border ${
+                session.reverted
+                  ? 'bg-orange-50 text-orange-700 border-orange-200'
+                  : status === 'executed'
+                  ? 'bg-green-50 text-green-700 border-green-200'
+                  : 'bg-gray-100 text-gray-500 border-gray-200'
+              }`}>
+                {session.reverted ? '↩ Revertido' : status === 'executed' ? '✓ Executado' : '✗ Rejeitado'}
+              </span>
+            </div>
           )}
         </div>
       </div>
 
       {/* Error feedback */}
-      {(executeMutation.isError || rejectMutation.isError) && (
+      {(executeMutation.isError || rejectMutation.isError || revertMutation.isError) && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-2 text-sm text-red-700">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {(executeMutation.error || rejectMutation.error)?.message}
+          {(executeMutation.error || rejectMutation.error || revertMutation.error)?.message}
+        </div>
+      )}
+      {revertMutation.isSuccess && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-2 text-sm text-orange-700">
+          <RotateCcw className="w-4 h-4 flex-shrink-0" />
+          Otimizações revertidas com sucesso.
         </div>
       )}
 
@@ -324,13 +382,18 @@ export function ApprovalDetail() {
 
       {/* Bottom approve bar */}
       {!isAlreadyDone && (
-        <div className="sticky bottom-6 bg-white border border-gray-200 rounded-2xl shadow-lg p-4 flex items-center justify-between gap-4">
+        <div className="sticky bottom-6 bg-white border border-gray-200 rounded-2xl shadow-lg p-4 flex items-center justify-between gap-4 flex-wrap">
           <p className="text-sm text-gray-600">
             <span className="font-semibold text-gray-900">
               {accounts.reduce((sum, acc, ai) => sum + getChecked(ai, acc.actions_detail.length).size, 0)}
-            </span> otimizações selecionadas
+            </span>
+            {' '}de{' '}
+            <span className="font-semibold text-gray-900">
+              {accounts.reduce((sum, acc) => sum + acc.actions_detail.length, 0)}
+            </span>
+            {' '}otimizações selecionadas
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => rejectMutation.mutate()}
               disabled={isMutating}
@@ -339,12 +402,22 @@ export function ApprovalDetail() {
               Rejeitar tudo
             </button>
             <button
-              onClick={() => executeMutation.mutate()}
+              onClick={() => executeMutation.mutate(buildAccountActions(accounts))}
+              disabled={isMutating}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 disabled:opacity-50 transition-colors"
+              title="Executa apenas as ações com checkbox marcado"
+            >
+              {executeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
+              Aplicar Selecionadas
+            </button>
+            <button
+              onClick={() => executeMutation.mutate(undefined)}
               disabled={isMutating}
               className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              title="Executa todas as ações propostas pela IA"
             >
               {executeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-              Aprovar e Executar
+              Aplicar Tudo
             </button>
           </div>
         </div>

@@ -27,6 +27,8 @@ export interface SessionSummary {
   executed_at?: string
   rejected: boolean
   rejected_at?: string
+  reverted: boolean
+  reverted_at?: string
   total_actions: number
   accounts_count: number
   accounts: {
@@ -45,6 +47,8 @@ export interface SessionDetail {
   executed_at?: string
   rejected: boolean
   rejected_at?: string
+  reverted: boolean
+  reverted_at?: string
   accounts: AccountResult[]
 }
 

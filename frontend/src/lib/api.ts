@@ -26,8 +26,14 @@ export const api = {
   sessions: {
     list: () => request<SessionsResponse>('/sessions'),
     get: (id: string) => request<SessionDetail>(`/sessions/${id}`),
-    execute: (id: string) => request<{ status: string }>(`/execute/${id}`, { method: 'POST' }),
+    // accountActions = undefined → executa tudo; mapa → executa apenas os índices selecionados
+    execute: (id: string, accountActions?: Record<string, number[]>) =>
+      request<{ status: string }>(`/execute/${id}`, {
+        method: 'POST',
+        body: JSON.stringify(accountActions != null ? { account_actions: accountActions } : {}),
+      }),
     reject: (id: string) => request<{ status: string }>(`/sessions/${id}/reject`, { method: 'POST' }),
+    revert: (id: string) => request<{ status: string; reverted_at: string }>(`/sessions/${id}/revert`, { method: 'POST' }),
   },
 
   reports: {

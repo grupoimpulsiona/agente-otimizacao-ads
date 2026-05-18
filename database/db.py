@@ -37,6 +37,8 @@ def init_db():
                 executed_at  TEXT,
                 rejected     INTEGER NOT NULL DEFAULT 0,
                 rejected_at  TEXT,
+                reverted     INTEGER NOT NULL DEFAULT 0,
+                reverted_at  TEXT,
                 customer_ids TEXT,
                 account_ids  TEXT,
                 date_range   TEXT,
@@ -61,6 +63,15 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_accounts_session
                 ON session_accounts(session_id);
         """)
+        # Migration: add colunas que podem não existir em DBs antigos
+        for stmt in [
+            "ALTER TABLE sessions ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN reverted_at TEXT",
+        ]:
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass  # coluna já existe
 
 
 # ─── Escrita ──────────────────────────────────────────────────────────────────
@@ -145,6 +156,17 @@ def mark_rejected(session_id: str) -> str:
     return rejected_at
 
 
+def mark_reverted(session_id: str) -> str:
+    """Marca sessão como revertida."""
+    reverted_at = datetime.now().isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE sessions SET reverted=1, reverted_at=? WHERE session_id=?",
+            (reverted_at, session_id),
+        )
+    return reverted_at
+
+
 # ─── Leitura ──────────────────────────────────────────────────────────────────
 
 def get_session(session_id: str) -> Optional[dict]:
@@ -167,6 +189,7 @@ def get_session(session_id: str) -> Optional[dict]:
         s["accounts"]     = [_account_to_api_dict(a) for a in account_rows]
         s["executed"]     = bool(s["executed"])
         s["rejected"]     = bool(s["rejected"])
+        s["reverted"]     = bool(s.get("reverted", 0))
         return s
 
 
@@ -175,7 +198,8 @@ def list_sessions(limit: int = 500) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(
             """SELECT session_id, platform, created_at,
-                      executed, executed_at, rejected, rejected_at
+                      executed, executed_at, rejected, rejected_at,
+                      reverted, reverted_at
                FROM sessions
                ORDER BY created_at DESC
                LIMIT ?""",
@@ -187,6 +211,7 @@ def list_sessions(limit: int = 500) -> list[dict]:
             d = dict(row)
             d["executed"] = bool(d["executed"])
             d["rejected"] = bool(d["rejected"])
+            d["reverted"] = bool(d.get("reverted", 0))
 
             accs = conn.execute(
                 """SELECT account_id, account_name, status, actions_count

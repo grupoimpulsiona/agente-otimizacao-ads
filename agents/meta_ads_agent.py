@@ -339,8 +339,16 @@ def _pause_ad_set(ad_set_id: str) -> dict:
     return _meta_post(ad_set_id, {"status": "PAUSED"})
 
 
+def _enable_ad_set(ad_set_id: str) -> dict:
+    return _meta_post(ad_set_id, {"status": "ACTIVE"})
+
+
 def _pause_ad(ad_id: str) -> dict:
     return _meta_post(ad_id, {"status": "PAUSED"})
+
+
+def _enable_ad(ad_id: str) -> dict:
+    return _meta_post(ad_id, {"status": "ACTIVE"})
 
 
 def _update_ad_set_bid(ad_set_id: str, new_bid_amount: int) -> dict:
@@ -405,6 +413,126 @@ def _safe_fetch(name: str, fn, *args, **kwargs):
     except Exception as e:
         log.warning(f"[prefetch] {name}: falhou — {e}")
         return []
+
+
+# ─── Replay: executa em produção exatamente o que foi aprovado no dry-run ────
+
+def replay_stored_actions(
+    ad_account_id: str,
+    actions_detail: list[dict],
+    selected_indices: list[int] | None = None,
+) -> dict:
+    """
+    Executa em produção as ações validadas no dry-run.
+    selected_indices: se fornecido, executa apenas os índices listados.
+    """
+    account_name = _get_account_name(ad_account_id)
+
+    to_execute = [
+        (i, a) for i, a in enumerate(actions_detail)
+        if selected_indices is None or i in selected_indices
+    ]
+
+    executed: list[dict] = []
+    errors:   list[dict] = []
+
+    for idx, action in to_execute:
+        tool       = action["tool"]
+        inp        = action["input"]
+        dry_result = action.get("result", {})
+
+        try:
+            if tool == "pause_ad_set":
+                result = _pause_ad_set(inp["ad_set_id"])
+                log_action(PLATFORM, tool, inp["ad_set_id"], inp, str(result), False)
+
+            elif tool == "pause_ad":
+                result = _pause_ad(inp["ad_id"])
+                log_action(PLATFORM, tool, inp["ad_id"], inp, str(result), False)
+
+            elif tool == "update_ad_set_bid":
+                # Usa o lance já ajustado pelo clamp do dry-run
+                adjusted_bid = dry_result.get("adjusted_bid") or inp["new_bid_amount"]
+                result = _update_ad_set_bid(inp["ad_set_id"], int(adjusted_bid))
+                log_action(PLATFORM, tool, inp["ad_set_id"], inp, str(result), False)
+
+            else:
+                log.warning(f"[replay] Tool desconhecida: {tool} — ignorada")
+                continue
+
+            executed.append({
+                "tool": tool, "input": inp, "result": result,
+                "description": action.get("description", ""),
+            })
+
+        except Exception as e:
+            log.error(f"[replay] Erro ao executar {tool} (idx={idx}): {e}")
+            errors.append({"tool": tool, "action_index": idx, "error": str(e)})
+
+    status = "ok" if not errors else ("partial_error" if executed else "error")
+    return {
+        "status":         status,
+        "account_name":   account_name,
+        "actions_count":  len(executed),
+        "actions_detail": executed,
+        "summary":        f"Replay: {len(executed)}/{len(to_execute)} ações executadas."
+                          + (f" {len(errors)} erro(s)." if errors else ""),
+        "dry_run":        False,
+        "errors":         errors,
+    }
+
+
+# ─── Revert: desfaz as ações de uma sessão já executada ─────────────────────
+
+def revert_stored_actions(ad_account_id: str, actions_detail: list[dict]) -> dict:
+    """
+    Reverte ações de uma sessão já executada.
+    actions_detail deve vir da sessão EXECUTADA (resultado real).
+    """
+    account_name = _get_account_name(ad_account_id)
+
+    reverted: list[dict] = []
+    errors:   list[dict] = []
+
+    for action in reversed(actions_detail):
+        tool = action["tool"]
+        inp  = action["input"]
+
+        try:
+            if tool == "pause_ad_set":
+                rv = _enable_ad_set(inp["ad_set_id"])
+                log_action(PLATFORM, f"revert_{tool}", inp["ad_set_id"], inp, str(rv), False)
+
+            elif tool == "pause_ad":
+                rv = _enable_ad(inp["ad_id"])
+                log_action(PLATFORM, f"revert_{tool}", inp["ad_id"], inp, str(rv), False)
+
+            elif tool == "update_ad_set_bid":
+                original_bid = inp["current_bid_amount"]
+                rv = _update_ad_set_bid(inp["ad_set_id"], int(original_bid))
+                log_action(PLATFORM, f"revert_{tool}", inp["ad_set_id"], inp, str(rv), False)
+
+            else:
+                continue
+
+            reverted.append({
+                "tool":        f"revert_{tool}",
+                "input":       inp,
+                "result":      rv,
+                "description": f"Revertido: {action.get('description', tool)}",
+            })
+
+        except Exception as e:
+            log.error(f"[revert] Erro ao reverter {tool}: {e}")
+            errors.append({"tool": tool, "error": str(e)})
+
+    return {
+        "status":           "ok" if not errors else ("partial_error" if reverted else "error"),
+        "account_name":     account_name,
+        "reverted_count":   len(reverted),
+        "reverted_actions": reverted,
+        "errors":           errors,
+    }
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────

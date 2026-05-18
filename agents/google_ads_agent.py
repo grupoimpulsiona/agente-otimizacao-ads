@@ -445,6 +445,35 @@ def _get_device_breakdown(client: GoogleAdsClient, customer_id: str, date_range:
 
 # ─── Ações de otimização (mutations) ─────────────────────────────────────────
 
+def _enable_keyword(client: GoogleAdsClient, customer_id: str, ad_group_id: str, keyword_id: str) -> dict:
+    """Reativa uma keyword pausada (operação de revert)."""
+    ag_criterion_service = client.get_service("AdGroupCriterionService")
+    criterion_op = client.get_type("AdGroupCriterionOperation")
+    criterion = criterion_op.update
+    criterion.resource_name = ag_criterion_service.ad_group_criterion_path(
+        customer_id, ad_group_id, keyword_id
+    )
+    criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+    field_mask = client.get_type("FieldMask")
+    field_mask.paths.append("status")
+    criterion_op.update_mask.CopyFrom(field_mask)
+    response = ag_criterion_service.mutate_ad_group_criteria(
+        customer_id=customer_id, operations=[criterion_op]
+    )
+    return {"enabled": str(response.results[0].resource_name)}
+
+
+def _remove_negative_keyword(client: GoogleAdsClient, customer_id: str, resource_name: str) -> dict:
+    """Remove uma keyword negativa pelo resource_name (operação de revert)."""
+    campaign_criterion_service = client.get_service("CampaignCriterionService")
+    criterion_op = client.get_type("CampaignCriterionOperation")
+    criterion_op.remove = resource_name
+    campaign_criterion_service.mutate_campaign_criteria(
+        customer_id=customer_id, operations=[criterion_op]
+    )
+    return {"removed": resource_name}
+
+
 def _pause_keyword(client: GoogleAdsClient, customer_id: str, ad_group_id: str, keyword_id: str) -> dict:
     ag_criterion_service = client.get_service("AdGroupCriterionService")
     criterion_op = client.get_type("AdGroupCriterionOperation")
@@ -555,6 +584,141 @@ def _safe_fetch(name: str, fn, *args, **kwargs):
     except Exception as e:
         log.warning(f"[prefetch] {name}: falhou — {e}")
         return []
+
+
+# ─── Replay: executa em produção exatamente o que foi aprovado no dry-run ────
+
+def replay_stored_actions(
+    customer_id: str,
+    actions_detail: list[dict],
+    selected_indices: list[int] | None = None,
+) -> dict:
+    """
+    Executa em produção as ações validadas no dry-run.
+    selected_indices: se fornecido, executa apenas os índices listados.
+    Retorna o mesmo formato de run() para compatibilidade com db.mark_executed.
+    """
+    client = _get_client()
+    account_name = _get_account_name(client, customer_id)
+
+    to_execute = [
+        (i, a) for i, a in enumerate(actions_detail)
+        if selected_indices is None or i in selected_indices
+    ]
+
+    executed: list[dict] = []
+    errors:   list[dict] = []
+
+    for idx, action in to_execute:
+        tool       = action["tool"]
+        inp        = action["input"]
+        dry_result = action.get("result", {})
+
+        try:
+            if tool == "pause_keyword":
+                result = _pause_keyword(client, customer_id, inp["ad_group_id"], inp["keyword_id"])
+                log_action(PLATFORM, tool, inp["keyword_id"], inp, str(result), False)
+
+            elif tool == "update_keyword_bid":
+                # Usa o lance já ajustado pelo clamp do dry-run (não recalcula)
+                adjusted_bid = dry_result.get("adjusted_bid_micros") or inp["new_bid_micros"]
+                result = _update_keyword_bid(
+                    client, customer_id, inp["ad_group_id"], inp["keyword_id"], int(adjusted_bid)
+                )
+                log_action(PLATFORM, tool, inp["keyword_id"], inp, str(result), False)
+
+            elif tool == "add_negative_keyword":
+                result = _add_negative_keyword(
+                    client, customer_id, inp["campaign_id"],
+                    inp["keyword_text"], inp.get("match_type", "PHRASE"),
+                )
+                log_action(PLATFORM, tool, inp["keyword_text"], inp, str(result), False)
+
+            else:
+                log.warning(f"[replay] Tool desconhecida: {tool} — ignorada")
+                continue
+
+            executed.append({
+                "tool": tool, "input": inp, "result": result,
+                "description": action.get("description", ""),
+            })
+
+        except Exception as e:
+            log.error(f"[replay] Erro ao executar {tool} (idx={idx}): {e}")
+            errors.append({"tool": tool, "action_index": idx, "error": str(e)})
+
+    status = "ok" if not errors else ("partial_error" if executed else "error")
+    return {
+        "status":         status,
+        "account_name":   account_name,
+        "actions_count":  len(executed),
+        "actions_detail": executed,
+        "summary":        f"Replay: {len(executed)}/{len(to_execute)} ações executadas."
+                          + (f" {len(errors)} erro(s)." if errors else ""),
+        "dry_run":        False,
+        "errors":         errors,
+    }
+
+
+# ─── Revert: desfaz as ações de uma sessão já executada ─────────────────────
+
+def revert_stored_actions(customer_id: str, actions_detail: list[dict]) -> dict:
+    """
+    Reverte ações de uma sessão já executada.
+    actions_detail deve vir da sessão EXECUTADA (resultado real, com resource names).
+    """
+    client = _get_client()
+    account_name = _get_account_name(client, customer_id)
+
+    reverted: list[dict] = []
+    errors:   list[dict] = []
+
+    for action in reversed(actions_detail):   # ordem reversa por segurança
+        tool   = action["tool"]
+        inp    = action["input"]
+        result = action.get("result", {})
+
+        try:
+            if tool == "pause_keyword":
+                rv = _enable_keyword(client, customer_id, inp["ad_group_id"], inp["keyword_id"])
+                log_action(PLATFORM, f"revert_{tool}", inp["keyword_id"], inp, str(rv), False)
+
+            elif tool == "update_keyword_bid":
+                original_bid = inp["current_bid_micros"]
+                rv = _update_keyword_bid(
+                    client, customer_id, inp["ad_group_id"], inp["keyword_id"], int(original_bid)
+                )
+                log_action(PLATFORM, f"revert_{tool}", inp["keyword_id"], inp, str(rv), False)
+
+            elif tool == "add_negative_keyword":
+                resource_name = result.get("resource")
+                if not resource_name:
+                    errors.append({"tool": tool, "error": "resource_name ausente no resultado — revert impossível"})
+                    continue
+                rv = _remove_negative_keyword(client, customer_id, resource_name)
+                log_action(PLATFORM, f"revert_{tool}", inp["keyword_text"], inp, str(rv), False)
+
+            else:
+                continue
+
+            reverted.append({
+                "tool":        f"revert_{tool}",
+                "input":       inp,
+                "result":      rv,
+                "description": f"Revertido: {action.get('description', tool)}",
+            })
+
+        except Exception as e:
+            log.error(f"[revert] Erro ao reverter {tool}: {e}")
+            errors.append({"tool": tool, "error": str(e)})
+
+    return {
+        "status":           "ok" if not errors else ("partial_error" if reverted else "error"),
+        "account_name":     account_name,
+        "reverted_count":   len(reverted),
+        "reverted_actions": reverted,
+        "errors":           errors,
+    }
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────

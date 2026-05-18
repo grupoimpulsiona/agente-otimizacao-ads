@@ -122,9 +122,8 @@ def _notify_sheets(platform: str, session_id: str, accounts: list[dict], execute
 
 def _format_whatsapp_proposal(platform: str, session_id: str, accounts: list[dict]) -> str:
     """Formata a mensagem de proposta com links de aprovação."""
-    today   = date.today().strftime("%d/%m/%Y")
-    label   = "Google Ads" if platform == "google_ads" else "Meta Ads"
-    webhook = "aprovar-google-ads" if platform == "google_ads" else "aprovar-meta-ads"
+    today = date.today().strftime("%d/%m/%Y")
+    label = "Google Ads" if platform == "google_ads" else "Meta Ads"
 
     lines = [f"🤖 *{label} — Análise {today}*\n"]
     total = 0
@@ -156,11 +155,9 @@ def _format_whatsapp_proposal(platform: str, session_id: str, accounts: list[dic
     )
     lines.append(
         f"\n━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 *Revisar no dashboard:*\n"
+        f"📱 *Revisar e aprovar no dashboard:*\n"
         f"{DASHBOARD_URL}/approvals/{session_id}\n\n"
-        f"✅ *Aprovar diretamente:*\n"
-        f"https://n8n.impulsionatm.com.br/webhook/{webhook}?session_id={session_id}\n\n"
-        f"❌ Para REJEITAR, ignore esta mensagem."
+        f"❌ Para REJEITAR, entre no dashboard e clique em Rejeitar."
     )
     return "\n".join(lines)
 
@@ -175,6 +172,13 @@ class GoogleAdsRequest(BaseModel):
 class MetaAdsRequest(BaseModel):
     ad_account_id: Optional[str] = None
     date_preset: str = "last_7d"
+
+
+class ExecuteRequest(BaseModel):
+    # Mapa account_id → lista de índices de ações a executar.
+    # None = executa todas as ações de todas as contas (aprovação total).
+    # {"cid": [0, 2]} = executa apenas os índices listados para cada conta.
+    account_actions: Optional[dict[str, list[int]]] = None
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -267,54 +271,76 @@ def analyze_meta_ads(
 # ── Fase 2: Executar (após aprovação) ────────────────────────────────────────
 
 @app.post("/execute/{session_id}")
-def execute_session(session_id: str, x_api_key: Optional[str] = Header(None)):
+def execute_session(
+    session_id: str,
+    req: Optional[ExecuteRequest] = None,
+    x_api_key: Optional[str] = Header(None),
+):
     _auth(x_api_key)
+
+    if req is None:
+        req = ExecuteRequest()
 
     session = db.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
     if session.get("executed"):
         raise HTTPException(status_code=409, detail="Esta sessão já foi executada.")
+    if session.get("rejected"):
+        raise HTTPException(status_code=409, detail="Esta sessão foi rejeitada e não pode ser executada.")
 
-    platform = session["platform"]
-    settings.dry_run = False
+    platform         = session["platform"]
+    stored_accounts  = session["accounts"]   # contas com actions_detail do dry-run
+    account_actions  = req.account_actions   # None = tudo; dict = seleção por conta
 
     try:
         if platform == "google_ads":
             from agents import google_ads_agent
             results = []
-            for cid in session["customer_ids"]:
-                log.info("[EXECUTE] Google Ads | conta=%s | sessão=%s", cid, session_id)
-                result = google_ads_agent.run(cid, session.get("date_range", "LAST_7_DAYS"))
+            for acc in stored_accounts:
+                cid = acc.get("customer_id", "")
+                if not cid:
+                    continue
+                selected = account_actions.get(cid) if account_actions is not None else None
+                log.info("[EXECUTE] Google Ads | conta=%s | sessão=%s | seleção=%s",
+                         cid, session_id, selected)
+                result = google_ads_agent.replay_stored_actions(
+                    cid, acc.get("actions_detail", []), selected
+                )
                 results.append({"customer_id": cid, **result})
+
         else:
             from agents import meta_ads_agent
             results = []
-            for aid in session["account_ids"]:
-                log.info("[EXECUTE] Meta Ads | conta=%s | sessão=%s", aid, session_id)
-                result = meta_ads_agent.run(aid, session.get("date_preset", "last_7d"))
+            for acc in stored_accounts:
+                aid = acc.get("ad_account_id", "")
+                if not aid:
+                    continue
+                selected = account_actions.get(aid) if account_actions is not None else None
+                log.info("[EXECUTE] Meta Ads | conta=%s | sessão=%s | seleção=%s",
+                         aid, session_id, selected)
+                result = meta_ads_agent.replay_stored_actions(
+                    aid, acc.get("actions_detail", []), selected
+                )
                 results.append({"ad_account_id": aid, **result})
 
         executed_at = db.mark_executed(session_id, results)
         log.info("[EXECUTE] Sessão %s executada com sucesso.", session_id)
 
-        # Notificações (independente de como a aprovação chegou)
         _notify_whatsapp(platform, session_id, results)
         _notify_sheets(platform, session_id, results, executed_at)
 
         return {
-            "status": "ok",
+            "status":     "ok",
             "session_id": session_id,
-            "platform": platform,
-            "accounts": results,
-            "dry_run": False,
+            "platform":   platform,
+            "accounts":   results,
+            "dry_run":    False,
         }
 
     except Exception as e:
         log.exception("[EXECUTE] Erro na sessão %s: %s", session_id, e)
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        settings.dry_run = True
 
 
 # ── Dashboard API ─────────────────────────────────────────────────────────────
@@ -333,14 +359,16 @@ def get_session(session_id: str, x_api_key: Optional[str] = Header(None)):
     if not session:
         raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
     return {
-        "session_id": session_id,
-        "platform": session["platform"],
-        "created_at": session["created_at"],
-        "executed": session["executed"],
+        "session_id":  session_id,
+        "platform":    session["platform"],
+        "created_at":  session["created_at"],
+        "executed":    session["executed"],
         "executed_at": session.get("executed_at"),
-        "rejected": session["rejected"],
+        "rejected":    session["rejected"],
         "rejected_at": session.get("rejected_at"),
-        "accounts": session["accounts"],
+        "reverted":    session.get("reverted", False),
+        "reverted_at": session.get("reverted_at"),
+        "accounts":    session["accounts"],
     }
 
 
@@ -357,6 +385,63 @@ def reject_session(session_id: str, x_api_key: Optional[str] = Header(None)):
     db.mark_rejected(session_id)
     log.info("[REJECT] Sessão %s rejeitada.", session_id)
     return {"status": "rejected", "session_id": session_id}
+
+
+@app.post("/sessions/{session_id}/revert")
+def revert_session(session_id: str, x_api_key: Optional[str] = Header(None)):
+    """
+    Reverte as ações de uma sessão já executada.
+    Usa os dados reais armazenados (resource names, bids originais) para desfazer cada ação.
+    """
+    _auth(x_api_key)
+
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
+    if not session.get("executed"):
+        raise HTTPException(status_code=409, detail="Sessão ainda não foi executada — nada a reverter.")
+    if session.get("reverted"):
+        raise HTTPException(status_code=409, detail="Esta sessão já foi revertida.")
+
+    platform        = session["platform"]
+    stored_accounts = session["accounts"]   # contas com resultados reais da execução
+
+    try:
+        if platform == "google_ads":
+            from agents import google_ads_agent
+            results = []
+            for acc in stored_accounts:
+                cid = acc.get("customer_id", "")
+                if not cid:
+                    continue
+                log.info("[REVERT] Google Ads | conta=%s | sessão=%s", cid, session_id)
+                result = google_ads_agent.revert_stored_actions(cid, acc.get("actions_detail", []))
+                results.append({"customer_id": cid, **result})
+        else:
+            from agents import meta_ads_agent
+            results = []
+            for acc in stored_accounts:
+                aid = acc.get("ad_account_id", "")
+                if not aid:
+                    continue
+                log.info("[REVERT] Meta Ads | conta=%s | sessão=%s", aid, session_id)
+                result = meta_ads_agent.revert_stored_actions(aid, acc.get("actions_detail", []))
+                results.append({"ad_account_id": aid, **result})
+
+        reverted_at = db.mark_reverted(session_id)
+        log.info("[REVERT] Sessão %s revertida.", session_id)
+
+        return {
+            "status":      "reverted",
+            "session_id":  session_id,
+            "platform":    platform,
+            "accounts":    results,
+            "reverted_at": reverted_at,
+        }
+
+    except Exception as e:
+        log.exception("[REVERT] Erro na sessão %s: %s", session_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/analyze/trigger")

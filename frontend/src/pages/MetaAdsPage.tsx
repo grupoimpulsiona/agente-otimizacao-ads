@@ -103,7 +103,7 @@ export function MetaAdsPage() {
   })
 
   const triggerMutation = useMutation({
-    mutationFn: api.analyze.trigger,
+    mutationFn: () => api.analyze.metaAds(),   // só Meta Ads, não Google
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
   })
 
