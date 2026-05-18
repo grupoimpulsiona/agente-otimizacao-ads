@@ -20,6 +20,23 @@ services:
       timeout: 10s
       retries: 3
 
+  # ── Dashboard React (Nginx) ───────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://31.97.170.137:8000
+        VITE_API_KEY: impulsiona-agente-ads-2026-seguro
+    container_name: ads-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - ads-network
+    depends_on:
+      - python-api
+
   # N8N não é gerenciado aqui — use o N8N já instalado na VPS.
   # Os workflows ficam em ./n8n/ para importação manual.
 
