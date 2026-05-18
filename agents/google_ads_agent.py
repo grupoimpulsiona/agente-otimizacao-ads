@@ -80,53 +80,62 @@ TOOLS_SCHEMA = [
     # ── Ações de otimização ──────────────────────────────────────────────────
     {
         "name": "pause_keyword",
-        "description": "Pausa uma keyword que está desperdiçando verba (CTR muito baixo, sem conversão e gasto acima do limiar). NUNCA use em campanhas com Smart Bidding automático (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS) sem verificar primeiro.",
+        "description": "Pausa uma keyword que está desperdiçando verba (CTR muito baixo, sem conversão e gasto acima do limiar). NUNCA use em campanhas com Smart Bidding automático (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS) sem verificar primeiro. Inclua campaign_name, ad_group_name e match_type para rastreabilidade.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string"},
+                "campaign_id": {"type": "string", "description": "ID numérico da campanha"},
+                "campaign_name": {"type": "string", "description": "Nome da campanha (obrigatório para rastreabilidade no dashboard)"},
                 "ad_group_id": {"type": "string"},
+                "ad_group_name": {"type": "string", "description": "Nome do grupo de anúncios (obrigatório para rastreabilidade)"},
                 "keyword_id": {"type": "string"},
-                "keyword_text": {"type": "string", "description": "Texto da keyword (para o log)"},
+                "keyword_text": {"type": "string", "description": "Texto da keyword"},
+                "match_type": {"type": "string", "description": "Tipo de correspondência da keyword: EXACT, PHRASE ou BROAD"},
                 "reason": {"type": "string", "description": "Justificativa com dados específicos: CTR, impressões, custo, conversões"},
             },
-            "required": ["customer_id", "ad_group_id", "keyword_id", "keyword_text", "reason"],
+            "required": ["customer_id", "campaign_id", "campaign_name", "ad_group_id", "ad_group_name", "keyword_id", "keyword_text", "match_type", "reason"],
         },
     },
     {
         "name": "update_keyword_bid",
-        "description": "Atualiza o CPC máximo de uma keyword. SOMENTE use em campanhas com lance MANUAL (Manual CPC). NUNCA use em campanhas com Smart Bidding (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS, MAXIMIZE_CONVERSION_VALUE) — o algoritmo gerencia automaticamente.",
+        "description": "Atualiza o CPC máximo de uma keyword. SOMENTE use em campanhas com lance MANUAL (Manual CPC). NUNCA use em campanhas com Smart Bidding (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS, MAXIMIZE_CONVERSION_VALUE). Inclua campaign_name, ad_group_name e match_type.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string"},
+                "campaign_id": {"type": "string", "description": "ID numérico da campanha"},
+                "campaign_name": {"type": "string", "description": "Nome da campanha (obrigatório para rastreabilidade no dashboard)"},
                 "ad_group_id": {"type": "string"},
+                "ad_group_name": {"type": "string", "description": "Nome do grupo de anúncios (obrigatório para rastreabilidade)"},
                 "keyword_id": {"type": "string"},
                 "keyword_text": {"type": "string"},
+                "match_type": {"type": "string", "description": "Tipo de correspondência da keyword: EXACT, PHRASE ou BROAD"},
                 "current_bid_micros": {"type": "integer", "description": "Lance atual em micros (1 real = 1.000.000 micros)"},
                 "new_bid_micros": {"type": "integer", "description": "Novo lance proposto em micros"},
                 "reason": {"type": "string", "description": "Justificativa com CPA atual, meta de CPA e bid strategy confirmada como manual"},
             },
-            "required": ["customer_id", "ad_group_id", "keyword_id", "keyword_text", "current_bid_micros", "new_bid_micros", "reason"],
+            "required": ["customer_id", "campaign_id", "campaign_name", "ad_group_id", "ad_group_name", "keyword_id", "keyword_text", "match_type", "current_bid_micros", "new_bid_micros", "reason"],
         },
     },
     {
         "name": "add_negative_keyword",
-        "description": "Adiciona uma keyword negativa em uma campanha para bloquear tráfego irrelevante ou de baixa intenção.",
+        "description": "Adiciona uma keyword negativa em uma campanha para bloquear tráfego irrelevante. CRÍTICO: keyword_text DEVE ser o search_term exato do relatório de termos de busca — NUNCA use o texto de uma keyword positiva existente (gera conflito de leilão). Inclua campaign_name para rastreabilidade.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string"},
                 "campaign_id": {"type": "string"},
-                "keyword_text": {"type": "string"},
+                "campaign_name": {"type": "string", "description": "Nome da campanha onde a negativa será adicionada (obrigatório para rastreabilidade no dashboard)"},
+                "keyword_text": {"type": "string", "description": "DEVE ser o search_term exato do relatório de termos de busca, não um texto de keyword positiva"},
                 "match_type": {
                     "type": "string",
                     "enum": ["EXACT", "PHRASE", "BROAD"],
-                    "description": "PHRASE para termos específicos irrelevantes; BROAD para termos muito genéricos",
+                    "description": "EXACT para bloquear apenas aquela busca específica (preferido); PHRASE para bloquear variações que contenham o termo em sequência; BROAD com extrema cautela",
                 },
-                "reason": {"type": "string", "description": "Justificativa com cliques, custo e por que o termo é irrelevante"},
+                "reason": {"type": "string", "description": "Justificativa com: o search_term exato, cliques, custo, e por que é irrelevante para o negócio"},
             },
-            "required": ["customer_id", "campaign_id", "keyword_text", "match_type", "reason"],
+            "required": ["customer_id", "campaign_id", "campaign_name", "keyword_text", "match_type", "reason"],
         },
     },
 ]
@@ -256,6 +265,7 @@ def _get_search_terms(client: GoogleAdsClient, customer_id: str, date_range: str
         SELECT
             search_term_view.search_term,
             campaign.id, campaign.name,
+            ad_group.id, ad_group.name,
             metrics.impressions, metrics.clicks, metrics.cost_micros,
             metrics.ctr, metrics.conversions
         FROM search_term_view
@@ -270,6 +280,8 @@ def _get_search_terms(client: GoogleAdsClient, customer_id: str, date_range: str
             "search_term": row.search_term_view.search_term,
             "campaign_id": str(row.campaign.id),
             "campaign_name": row.campaign.name,
+            "ad_group_id": str(row.ad_group.id),
+            "ad_group_name": row.ad_group.name,
             "impressions": row.metrics.impressions,
             "clicks": row.metrics.clicks,
             "cost_brl": round(row.metrics.cost_micros / 1e6, 2),

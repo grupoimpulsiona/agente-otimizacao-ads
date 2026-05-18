@@ -6,7 +6,7 @@ import {
   FileSpreadsheet, ExternalLink, TrendingUp, BarChart2, Zap,
   Activity, ChevronDown, ChevronUp, CheckCircle, Info, RotateCcw, Loader2
 } from 'lucide-react'
-import type { ReportExecution, ReportAccount } from '../types'
+import type { ReportExecution, ReportAccount, ActionDetail } from '../types'
 
 const SHEETS_URL = import.meta.env.VITE_SHEETS_URL || ''
 
@@ -79,9 +79,9 @@ function AccountRow({
 function ActionBadge({ description }: { description: string }) {
   const getColor = () => {
     const d = description.toLowerCase()
-    if (d.includes('pausar') || d.includes('pause'))       return 'bg-red-50 text-red-700 border-red-200'
+    if (d.includes('pausou') || d.includes('pause'))       return 'bg-red-50 text-red-700 border-red-200'
     if (d.includes('lance') || d.includes('bid'))          return 'bg-blue-50 text-blue-700 border-blue-200'
-    if (d.includes('negativ'))                             return 'bg-orange-50 text-orange-700 border-orange-200'
+    if (d.includes('negativa') || d.includes('negativ'))   return 'bg-orange-50 text-orange-700 border-orange-200'
     if (d.includes('ativar') || d.includes('enable'))      return 'bg-green-50 text-green-700 border-green-200'
     return 'bg-gray-50 text-gray-700 border-gray-200'
   }
@@ -90,6 +90,17 @@ function ActionBadge({ description }: { description: string }) {
       {description}
     </span>
   )
+}
+
+/** Agrupa actions_detail por campaign_name para o relatório */
+function groupActionsByCampaign(actions: ActionDetail[]): Map<string, ActionDetail[]> {
+  const map = new Map<string, import('../types').ActionDetail[]>()
+  actions.forEach(action => {
+    const campaign = (action.input as Record<string, string>)?.campaign_name || 'Geral'
+    if (!map.has(campaign)) map.set(campaign, [])
+    map.get(campaign)!.push(action)
+  })
+  return map
 }
 
 function ExecutionRow({ execution }: { execution: ReportExecution }) {
@@ -190,7 +201,7 @@ function ExecutionRow({ execution }: { execution: ReportExecution }) {
           {execution.accounts.map((acc: ReportAccount, ai) => (
             <div key={ai} className="mt-4">
               {/* Account header */}
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-3">
                 <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
                 <span className="text-sm font-semibold text-gray-800">
                   {acc.account_name || acc.account_id}
@@ -200,11 +211,20 @@ function ExecutionRow({ execution }: { execution: ReportExecution }) {
                 </span>
               </div>
 
-              {/* Actions list */}
+              {/* Actions grouped by campaign */}
               {acc.actions_detail.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 pl-6">
-                  {acc.actions_detail.map((action, idx) => (
-                    <ActionBadge key={idx} description={action.description} />
+                <div className="pl-6 space-y-3">
+                  {Array.from(groupActionsByCampaign(acc.actions_detail).entries()).map(([campaign, actions]) => (
+                    <div key={campaign}>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                        📢 {campaign}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {actions.map((action, idx) => (
+                          <ActionBadge key={idx} description={action.description} />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : (

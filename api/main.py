@@ -437,8 +437,10 @@ def revert_session(session_id: str, x_api_key: Optional[str] = Header(None)):
                 cid = acc.get("customer_id", "")
                 if not cid:
                     continue
-                log.info("[REVERT] Google Ads | conta=%s | sessão=%s", cid, session_id)
-                result = google_ads_agent.revert_stored_actions(cid, acc.get("actions_detail", []))
+                actions = acc.get("actions_detail", [])
+                log.info("[REVERT] Google Ads | conta=%s | sessão=%s | ações=%d",
+                         cid, session_id, len(actions))
+                result = google_ads_agent.revert_stored_actions(cid, actions)
                 results.append({"customer_id": cid, **result})
         else:
             from agents import meta_ads_agent
@@ -447,21 +449,46 @@ def revert_session(session_id: str, x_api_key: Optional[str] = Header(None)):
                 aid = acc.get("ad_account_id", "")
                 if not aid:
                     continue
-                log.info("[REVERT] Meta Ads | conta=%s | sessão=%s", aid, session_id)
-                result = meta_ads_agent.revert_stored_actions(aid, acc.get("actions_detail", []))
+                actions = acc.get("actions_detail", [])
+                log.info("[REVERT] Meta Ads | conta=%s | sessão=%s | ações=%d",
+                         aid, session_id, len(actions))
+                result = meta_ads_agent.revert_stored_actions(aid, actions)
                 results.append({"ad_account_id": aid, **result})
 
+        # Contabiliza o resultado geral
+        total_reverted = sum(r.get("reverted_count", 0) for r in results)
+        total_actions  = sum(len(acc.get("actions_detail", [])) for acc in stored_accounts)
+        all_errors     = [
+            {"account": r.get("customer_id") or r.get("ad_account_id", ""), **e}
+            for r in results for e in r.get("errors", [])
+        ]
+
+        log.info("[REVERT] Sessão %s: %d/%d revertidas, %d erros.",
+                 session_id, total_reverted, total_actions, len(all_errors))
+
+        # Só bloqueia se NENHUMA ação foi revertida e há erros — permite reversão parcial
+        if total_actions > 0 and total_reverted == 0 and all_errors:
+            error_msgs = "; ".join(e.get("error", "erro desconhecido") for e in all_errors[:3])
+            raise HTTPException(
+                status_code=500,
+                detail=f"Revert falhou — nenhuma ação revertida. {error_msgs}"
+            )
+
         reverted_at = db.mark_reverted(session_id)
-        log.info("[REVERT] Sessão %s revertida.", session_id)
 
         return {
-            "status":      "reverted",
-            "session_id":  session_id,
-            "platform":    platform,
-            "accounts":    results,
-            "reverted_at": reverted_at,
+            "status":         "reverted",
+            "session_id":     session_id,
+            "platform":       platform,
+            "total_reverted": total_reverted,
+            "total_actions":  total_actions,
+            "errors":         all_errors,
+            "accounts":       results,
+            "reverted_at":    reverted_at,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception("[REVERT] Erro na sessão %s: %s", session_id, e)
         raise HTTPException(status_code=500, detail=str(e))

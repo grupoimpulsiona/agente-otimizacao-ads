@@ -26,12 +26,37 @@ function toolLabel(tool: string) {
   const map: Record<string, string> = {
     pause_keyword: '⏸ Pausar Keyword',
     update_keyword_bid: '💰 Ajustar Lance',
-    add_negative_keyword: '🚫 Adicionar Negativa',
+    add_negative_keyword: '🚫 Negativa',
     pause_ad_set: '⏸ Pausar Ad Set',
     pause_ad: '⏸ Pausar Anúncio',
     update_ad_set_bid: '💰 Ajustar Lance Ad Set',
   }
   return map[tool] || tool
+}
+
+/** Extrai contexto da ação: campanha, grupo, correspondência */
+function getActionContext(action: ActionDetail) {
+  const inp = action.input as Record<string, string>
+  return {
+    campaignName: inp?.campaign_name || '',
+    adGroupName:  inp?.ad_group_name || '',
+    matchType:    inp?.match_type    || '',
+    keywordText:  inp?.keyword_text  || '',
+  }
+}
+
+function MatchTypeBadge({ type }: { type: string }) {
+  const colors: Record<string, string> = {
+    EXACT:  'bg-purple-50 text-purple-700 border-purple-200',
+    PHRASE: 'bg-blue-50   text-blue-700   border-blue-200',
+    BROAD:  'bg-orange-50 text-orange-700 border-orange-200',
+  }
+  if (!type) return null
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${colors[type] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+      {type}
+    </span>
+  )
 }
 
 function ActionCard({
@@ -45,6 +70,8 @@ function ActionCard({
   onToggle: () => void
   disabled: boolean
 }) {
+  const { adGroupName, matchType } = getActionContext(action)
+
   return (
     <div
       className={`flex items-start gap-3 p-4 rounded-xl border transition-all cursor-pointer ${
@@ -60,10 +87,17 @@ function ActionCard({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+        {/* Tool label + match type + ad group */}
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
           <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded-md">
             {toolLabel(action.tool)}
           </span>
+          {matchType && <MatchTypeBadge type={matchType} />}
+          {adGroupName && (
+            <span className="text-[10px] text-gray-400 font-medium truncate max-w-[160px]" title={adGroupName}>
+              {adGroupName}
+            </span>
+          )}
         </div>
         <p className="text-sm text-gray-800 leading-relaxed">{action.description}</p>
       </div>
@@ -117,6 +151,17 @@ function SummarySection({ summary }: { summary: string }) {
   )
 }
 
+/** Agrupa actions_detail por campaign_name (ou "Geral" se ausente) */
+function groupByCampaign(actions: ActionDetail[]): Map<string, { action: ActionDetail; idx: number }[]> {
+  const map = new Map<string, { action: ActionDetail; idx: number }[]>()
+  actions.forEach((action, idx) => {
+    const campaign = (action.input as Record<string, string>)?.campaign_name || 'Geral'
+    if (!map.has(campaign)) map.set(campaign, [])
+    map.get(campaign)!.push({ action, idx })
+  })
+  return map
+}
+
 function AccountSection({ account, checkedActions, onToggle, onSelectAll, onDeselectAll, disabled }: {
   account: AccountResult
   checkedActions: Set<number>
@@ -128,6 +173,8 @@ function AccountSection({ account, checkedActions, onToggle, onSelectAll, onDese
   const total = account.actions_detail.length
   const allChecked = checkedActions.size === total
   const noneChecked = checkedActions.size === 0
+
+  const campaignGroups = groupByCampaign(account.actions_detail)
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -167,21 +214,39 @@ function AccountSection({ account, checkedActions, onToggle, onSelectAll, onDese
           </div>
         )}
 
-        {/* Actions */}
+        {/* Actions grouped by campaign */}
         {account.actions_detail.length > 0 && (
           <div>
             <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5" /> Ações Propostas
             </h4>
-            <div className="space-y-2">
-              {account.actions_detail.map((action, idx) => (
-                <ActionCard
-                  key={idx}
-                  action={action}
-                  checked={checkedActions.has(idx)}
-                  onToggle={() => onToggle(idx)}
-                  disabled={disabled}
-                />
+            <div className="space-y-5">
+              {Array.from(campaignGroups.entries()).map(([campaignName, items]) => (
+                <div key={campaignName}>
+                  {/* Campaign header */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="h-px flex-1 bg-gray-100" />
+                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider px-2 whitespace-nowrap">
+                      📢 {campaignName}
+                    </span>
+                    <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                      {items.length}
+                    </span>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  {/* Actions for this campaign */}
+                  <div className="space-y-2">
+                    {items.map(({ action, idx }) => (
+                      <ActionCard
+                        key={idx}
+                        action={action}
+                        checked={checkedActions.has(idx)}
+                        onToggle={() => onToggle(idx)}
+                        disabled={disabled}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

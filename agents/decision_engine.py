@@ -145,6 +145,34 @@ Liste o que está funcionando e não deve ser alterado, com justificativa nos da
 4. Cada ação DEVE ter justificativa com número específico dos dados
 5. Dúvida → não aja. Sinalize no resumo
 6. Toda mudança estrutural reinicia o aprendizado do algoritmo — considere o custo disso
+7. SEMPRE preencha campaign_name, ad_group_name e match_type nas ferramentas que os aceitam
+
+## REGRAS CRÍTICAS PARA NEGATIVAÇÕES (add_negative_keyword)
+
+⚠️ RISCO ALTO: Uma negativação errada pode bloquear tráfego qualificado ou criar conflito de leilão.
+
+### O que negativar
+- Use EXCLUSIVAMENTE search_terms do relatório de termos de busca que comprovadamente geraram cliques/custo sem conversão E são irrelevantes para o negócio.
+- O campo `keyword_text` DEVE ser o search_term exato conforme aparece no relatório (ex: "empresa de eventos barata rj").
+
+### O que NUNCA negativar
+- ❌ NUNCA use o texto de uma keyword positiva existente (ex: se "empresa de eventos" é keyword → negativar cria conflito imediato de leilão)
+- ❌ NUNCA negativar termos parcialmente contidos em keywords ativas com PHRASE ou BROAD match — pode bloquear variações relevantes
+
+### Verificação obrigatória antes de cada negativação
+1. O search_term que vou negativar (ou qualquer parte dele) está presente nas keywords ativas desta campanha?
+   - Se SIM → NÃO execute. Sinalize como atenção manual no resumo.
+   - Se NÃO → pode prosseguir.
+2. Este termo tem intenção de compra/contratação para o negócio do cliente?
+   - Se tiver alguma dúvida → NÃO execute. Sinalize no resumo.
+
+### Tipo de correspondência
+- Use `EXACT` como padrão — bloqueia apenas aquela busca específica, sem risco de cobertura excessiva.
+- Use `PHRASE` somente quando TODOS os termos da sequência são claramente irrelevantes.
+- Evite `BROAD` — risco de bloquear termos relevantes acidentalmente.
+
+### Campos obrigatórios
+Sempre inclua `campaign_name` para identificação no dashboard.
 
 ## FORMATO DO RESUMO FINAL
 Encerre SEMPRE com este resumo:
@@ -446,21 +474,29 @@ def _extract_text(parts) -> str:
 
 
 def _describe_action(tool_name: str, inp: dict, result: Any) -> str:
-    """Gera descrição legível de uma ação para o WhatsApp."""
+    """Gera descrição legível de uma ação para o dashboard e WhatsApp."""
+    campaign   = inp.get("campaign_name", "")
+    ad_group   = inp.get("ad_group_name", "")
+    match_type = inp.get("match_type", "")
+
+    # Contexto de campanha/grupo — ex: "[MARKET EVENTOS › Pesquisa Geral]"
+    ctx_parts = [p for p in [campaign, ad_group] if p]
+    ctx       = f" [{' › '.join(ctx_parts)}]" if ctx_parts else ""
+    mt        = f" [{match_type}]" if match_type else ""
+
     descriptions = {
         "pause_keyword": (
-            f"Pausou keyword '{inp.get('keyword_text', inp.get('keyword_id', '?'))}'"
-            f" | Motivo: {inp.get('reason', '—')}"
+            f"Pausou '{inp.get('keyword_text', inp.get('keyword_id', '?'))}'{mt}{ctx}"
+            f" | {inp.get('reason', '—')}"
         ),
         "update_keyword_bid": (
-            f"Ajustou lance de '{inp.get('keyword_text', '?')}'"
-            f" de R${inp.get('current_bid_micros', 0) / 1e6:.2f}"
+            f"Lance '{inp.get('keyword_text', '?')}'{mt}{ctx}"
+            f" R${inp.get('current_bid_micros', 0) / 1e6:.2f}"
             f" → R${inp.get('new_bid_micros', 0) / 1e6:.2f}"
             f" | {inp.get('reason', '—')}"
         ),
         "add_negative_keyword": (
-            f"Adicionou negativa '{inp.get('keyword_text', '?')}'"
-            f" [{inp.get('match_type', 'PHRASE')}]"
+            f"Negativa {mt} '{inp.get('keyword_text', '?')}'{ctx}"
             f" | {inp.get('reason', '—')}"
         ),
         "pause_ad": (
