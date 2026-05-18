@@ -312,7 +312,13 @@ def run(ad_account_id: str, date_preset: str = "last_7d") -> dict:
         )
 
         notify_run_result(PLATFORM, summary, actions, settings.dry_run)
-        return {"status": "ok", "actions": len(actions), "summary": summary, "dry_run": settings.dry_run}
+        return {
+            "status": "ok",
+            "actions_count": len(actions),
+            "actions_detail": actions,
+            "summary": summary,
+            "dry_run": settings.dry_run,
+        }
 
     except GuardrailViolation as e:
         msg = f"Guardrail ativado: {e}"

@@ -16,76 +16,82 @@
       "name": "Trigger 7h30 (Seg-Sex)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [200, 300]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://31.97.170.137:8000/optimize/meta-ads",
+        "url": "http://31.97.170.137:8000/analyze/meta-ads",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "impulsiona-agente-ads-2026-seguro"
-            }
+            { "name": "x-api-key", "value": "impulsiona-agente-ads-2026-seguro" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"date_preset\": \"last_7d\"\n}",
-        "options": {
-          "timeout": 600000
-        }
+        "jsonBody": "{ \"date_preset\": \"last_7d\" }",
+        "options": { "timeout": 600000 }
       },
       "id": "meta-0002",
-      "name": "Rodar Agente Meta Ads",
+      "name": "Analisar Meta Ads",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 300]
+      "position": [440, 300]
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-          "conditions": [
-            {
-              "id": "cond-001",
-              "leftValue": "={{ $json.status }}",
-              "rightValue": "ok",
-              "operator": { "type": "string", "operation": "equals" }
-            }
-          ],
-          "combinator": "and"
-        }
+        "method": "POST",
+        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "1EC47F97E146-4487-8575-875E43229803" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"{{ $('Analisar Meta Ads').item.json.actions_text }}\\n\\n✅ *Aprovar execução:*\\n{{ $('Aguardar Aprovação').item.json.resumeUrl }}\\n\\n⏱ Aguardando sua aprovação por 2 horas.\"\n}",
+        "options": {}
       },
       "id": "meta-0003",
-      "name": "Sucesso ou Erro?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [720, 300]
+      "name": "WhatsApp — Proposta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "1EC47F97E146-4487-8575-875E43229803" },
-            { "name": "Content-Type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Meta Ads — Otimização Concluída*\\n\\n📊 Contas processadas: {{ $('Rodar Agente Meta Ads').item.json.accounts.length }}\\n🔧 Modo: {{ $('Rodar Agente Meta Ads').item.json.dry_run ? 'DRY-RUN ✋' : 'PRODUÇÃO 🚀' }}\\n\\n_Verifique os logs para detalhes das ações tomadas._\"\n}",
-        "options": {}
+        "resume": "webhook",
+        "options": {
+          "webhookSuffix": "aprovar-meta-ads"
+        }
       },
       "id": "meta-0004",
-      "name": "WhatsApp — Sucesso",
+      "name": "Aguardar Aprovação",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [680, 300],
+      "webhookId": "aprovar-meta-ads"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://31.97.170.137:8000/execute/{{ $('Analisar Meta Ads').item.json.session_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "impulsiona-agente-ads-2026-seguro" }
+          ]
+        },
+        "options": { "timeout": 600000 }
+      },
+      "id": "meta-0005",
+      "name": "Executar Ações",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 180]
+      "position": [1160, 300]
     },
     {
       "parameters": {
@@ -100,22 +106,22 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *ERRO — Agente Meta Ads*\\n\\nStatus: {{ $('Rodar Agente Meta Ads').item.json.status }}\\nDetalhe: {{ $('Rodar Agente Meta Ads').item.json.error }}\\n\\n_Verifique os logs da API._\"\n}",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Meta Ads — Execução Concluída*\\n\\n📊 Contas processadas: {{ $('Executar Ações').item.json.accounts.length }}\\n🚀 Modo: PRODUÇÃO\\n\\n_Ações executadas com sucesso!_\"\n}",
         "options": {}
       },
-      "id": "meta-0005",
-      "name": "WhatsApp — Erro",
+      "id": "meta-0006",
+      "name": "WhatsApp — Executado",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 420]
+      "position": [1400, 300]
     },
     {
       "parameters": {},
-      "id": "meta-0006",
+      "id": "meta-0007",
       "name": "Error Trigger Global",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [240, 560]
+      "position": [200, 560]
     },
     {
       "parameters": {
@@ -130,38 +136,41 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA CRÍTICA — Workflow Meta Ads*\\n\\nErro: {{ $json.error.message }}\\nExecução: {{ $json.executionId }}\\n\\nVerifique o N8N imediatamente.\"\n}",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA — Workflow Meta Ads*\\n\\nErro: {{ $json.error.message }}\\nExecução: {{ $json.executionId }}\\n\\nVerifique o N8N.\"\n}",
         "options": {}
       },
-      "id": "meta-0007",
-      "name": "WhatsApp — Falha Crítica",
+      "id": "meta-0008",
+      "name": "WhatsApp — Erro",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 560]
+      "position": [440, 560]
     }
   ],
   "connections": {
     "Trigger 7h30 (Seg-Sex)": {
-      "main": [[{ "node": "Rodar Agente Meta Ads", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Analisar Meta Ads", "type": "main", "index": 0 }]]
     },
-    "Rodar Agente Meta Ads": {
-      "main": [[{ "node": "Sucesso ou Erro?", "type": "main", "index": 0 }]]
+    "Analisar Meta Ads": {
+      "main": [[{ "node": "Aguardar Aprovação", "type": "main", "index": 0 }]]
     },
-    "Sucesso ou Erro?": {
-      "main": [
-        [{ "node": "WhatsApp — Sucesso", "type": "main", "index": 0 }],
-        [{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]
-      ]
+    "Aguardar Aprovação": {
+      "main": [[{ "node": "WhatsApp — Proposta", "type": "main", "index": 0 }]]
+    },
+    "WhatsApp — Proposta": {
+      "main": [[{ "node": "Executar Ações", "type": "main", "index": 0 }]]
+    },
+    "Executar Ações": {
+      "main": [[{ "node": "WhatsApp — Executado", "type": "main", "index": 0 }]]
     },
     "Error Trigger Global": {
-      "main": [[{ "node": "WhatsApp — Falha Crítica", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]]
     }
   },
   "active": false,
   "settings": {
     "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all",
-    "executionTimeout": 660,
+    "executionTimeout": 7200,
     "timezone": "America/Sao_Paulo"
   },
   "tags": ["ads", "meta-ads", "automacao"]
