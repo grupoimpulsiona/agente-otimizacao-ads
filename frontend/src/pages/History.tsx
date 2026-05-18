@@ -1,22 +1,80 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { getSessionStatus, platformLabel, platformColor, statusConfig, formatDateTime, formatRelativeTime } from '../lib/utils'
-import { History as HistoryIcon, CheckCircle, XCircle, Clock } from 'lucide-react'
+import {
+  History as HistoryIcon, CheckCircle, XCircle, Clock,
+  BarChart2, TrendingUp
+} from 'lucide-react'
+import type { Platform, SessionStatus } from '../types'
+
+type PlatformTab = 'all' | Platform
+type StatusTab   = 'all' | SessionStatus
+
+const platformTabs: { id: PlatformTab; label: string; icon: React.ElementType }[] = [
+  { id: 'all',        label: 'Todas',      icon: HistoryIcon },
+  { id: 'google_ads', label: 'Google Ads', icon: BarChart2   },
+  { id: 'meta_ads',   label: 'Meta Ads',   icon: TrendingUp  },
+]
+
+const statusTabs: { id: StatusTab; label: string }[] = [
+  { id: 'all',      label: 'Todos'      },
+  { id: 'pending',  label: 'Pendentes'  },
+  { id: 'executed', label: 'Executados' },
+  { id: 'rejected', label: 'Rejeitados' },
+]
 
 export function History() {
+  const [platformTab, setPlatformTab] = useState<PlatformTab>('all')
+  const [statusTab,   setStatusTab]   = useState<StatusTab>('all')
+
   const { data, isLoading } = useQuery({
     queryKey: ['sessions'],
     queryFn: api.sessions.list,
     refetchInterval: 30_000,
   })
 
-  const sessions = data?.sessions ?? []
+  const sessions = (data?.sessions ?? [])
+    .filter(s => platformTab === 'all' || s.platform === platformTab)
+    .filter(s => statusTab   === 'all' || getSessionStatus(s) === statusTab)
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Histórico</h1>
-        <p className="text-gray-500 mt-1">Registro de todas as análises e execuções</p>
+        <p className="text-gray-500 mt-1">Registro completo de todas as análises e execuções</p>
+      </div>
+
+      {/* Platform tabs */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+          {platformTabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setPlatformTab(id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                platformTab === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+          {statusTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setStatusTab(id)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                statusTab === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -28,7 +86,8 @@ export function History() {
         ) : sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <HistoryIcon className="w-10 h-10 mb-4 opacity-30" />
-            <p className="font-semibold text-gray-600">Nenhum histórico ainda</p>
+            <p className="font-semibold text-gray-600">Nenhum resultado encontrado</p>
+            <p className="text-sm mt-1">Tente ajustar os filtros</p>
           </div>
         ) : (
           <table className="w-full">
@@ -44,10 +103,10 @@ export function History() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {sessions.map(s => {
-                const status = getSessionStatus(s)
-                const statusCfg = statusConfig(status)
+                const status      = getSessionStatus(s)
+                const statusCfg   = statusConfig(status)
                 const platformCfg = platformColor(s.platform)
-                const StatusIcon = status === 'executed' ? CheckCircle : status === 'rejected' ? XCircle : Clock
+                const StatusIcon  = status === 'executed' ? CheckCircle : status === 'rejected' ? XCircle : Clock
 
                 return (
                   <tr key={s.session_id} className="hover:bg-gray-50 transition-colors">

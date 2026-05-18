@@ -66,7 +66,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: ($('Analisar Meta Ads').item.json.actions_text || '⚠️ Sem ações para exibir') + '\\n\\n━━━━━━━━━━━━━━━━━━━\\n✅ Para APROVAR, clique:\\nhttps://n8n.impulsionatm.com.br/webhook/aprovar-meta-ads?session_id=' + $('Analisar Meta Ads').item.json.session_id + '\\n\\n❌ Para REJEITAR, ignore esta mensagem.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: $('Analisar Meta Ads').item.json.actions_text || '⚠️ Sem ações para exibir' }) }}",
         "options": { "timeout": 30000 }
       },
       "id": "meta-004",
@@ -91,59 +91,7 @@
       "name": "Executar Ações",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 600]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "0ad361c63b3afb50cf98795c001a41b9" },
-            { "name": "Content-Type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: '✅ *Meta Ads — Execução Concluída*\\n\\n📊 Contas: ' + (($('Executar Ações').item.json.accounts || []).length) + '\\n🚀 Modo: PRODUÇÃO\\n\\n_Otimizações aplicadas com sucesso!_' }) }}",
-        "options": { "timeout": 30000 }
-      },
-      "id": "meta-007",
-      "name": "WhatsApp — Confirmação",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [760, 600]
-    },
-    {
-      "parameters": {},
-      "id": "meta-008",
-      "name": "Error Trigger Global",
-      "type": "n8n-nodes-base.errorTrigger",
-      "typeVersion": 1,
-      "position": [200, 780]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://evolution.impulsionatm.com.br/message/sendText/impulsionanumber3",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "0ad361c63b3afb50cf98795c001a41b9" },
-            { "name": "Content-Type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: '🚨 *FALHA — Meta Ads*\\n\\nErro: ' + (($json.error && $json.error.message) || $json.message || 'Erro desconhecido') + '\\nVerifique o N8N.' }) }}",
-        "options": { "timeout": 30000 }
-      },
-      "id": "meta-009",
-      "name": "WhatsApp — Erro",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [480, 780]
+      "position": [480, 500]
     }
   ],
   "connections": {
@@ -154,15 +102,7 @@
       "main": [[{ "node": "WhatsApp — Proposta", "type": "main", "index": 0 }]]
     },
     "Webhook Aprovação": {
-      "main": [[
-        { "node": "Executar Ações", "type": "main", "index": 0 }
-      ]]
-    },
-    "Executar Ações": {
-      "main": [[{ "node": "WhatsApp — Confirmação", "type": "main", "index": 0 }]]
-    },
-    "Error Trigger Global": {
-      "main": [[{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Executar Ações", "type": "main", "index": 0 }]]
     }
   },
   "active": false,
