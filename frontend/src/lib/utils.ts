@@ -3,6 +3,8 @@ import { formatDistanceToNow, parseISO, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Platform, SessionStatus } from '../types'
 
+export { getSessionStatus } from '../types'
+
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
 }
