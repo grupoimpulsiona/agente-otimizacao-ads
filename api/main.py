@@ -9,6 +9,7 @@ Fluxo de aprovação humana (human-in-the-loop):
 
 import uuid
 import os
+import secrets
 import requests as _requests
 from datetime import datetime, date
 from typing import Optional
@@ -175,9 +176,12 @@ class MetaAdsRequest(BaseModel):
 
 
 class ExecuteRequest(BaseModel):
+    # Token gerado na criação da sessão — obrigatório para novas sessões.
+    # Só o dashboard tem acesso (vem do GET /sessions/{id}).
+    # Sem ele a execução é bloqueada mesmo que a API key esteja correta.
+    execute_token: Optional[str] = None
     # Mapa account_id → lista de índices de ações a executar.
     # None = executa todas as ações de todas as contas (aprovação total).
-    # {"cid": [0, 2]} = executa apenas os índices listados para cada conta.
     account_actions: Optional[dict[str, list[int]]] = None
 
 
@@ -289,6 +293,24 @@ def execute_session(
     if session.get("rejected"):
         raise HTTPException(status_code=409, detail="Esta sessão foi rejeitada e não pode ser executada.")
 
+    # ── Validação do token de execução ────────────────────────────────────────
+    # Sessões novas têm execute_token. Sem ele a chamada é barrada, mesmo
+    # com API key válida — impede execução via N8N, webhook ou link antigo.
+    stored_token = session.get("execute_token")
+    if stored_token:
+        if not req.execute_token:
+            log.warning("[EXECUTE] Bloqueado — token ausente | sessão=%s", session_id)
+            raise HTTPException(
+                status_code=403,
+                detail="Execução bloqueada: token de sessão ausente. Aprovações devem ser feitas pelo dashboard."
+            )
+        if not secrets.compare_digest(req.execute_token, stored_token):
+            log.warning("[EXECUTE] Bloqueado — token inválido | sessão=%s", session_id)
+            raise HTTPException(
+                status_code=403,
+                detail="Execução bloqueada: token de sessão inválido."
+            )
+
     platform         = session["platform"]
     stored_accounts  = session["accounts"]   # contas com actions_detail do dry-run
     account_actions  = req.account_actions   # None = tudo; dict = seleção por conta
@@ -359,16 +381,17 @@ def get_session(session_id: str, x_api_key: Optional[str] = Header(None)):
     if not session:
         raise HTTPException(status_code=404, detail=f"Sessão '{session_id}' não encontrada.")
     return {
-        "session_id":  session_id,
-        "platform":    session["platform"],
-        "created_at":  session["created_at"],
-        "executed":    session["executed"],
-        "executed_at": session.get("executed_at"),
-        "rejected":    session["rejected"],
-        "rejected_at": session.get("rejected_at"),
-        "reverted":    session.get("reverted", False),
-        "reverted_at": session.get("reverted_at"),
-        "accounts":    session["accounts"],
+        "session_id":    session_id,
+        "platform":      session["platform"],
+        "created_at":    session["created_at"],
+        "executed":      session["executed"],
+        "executed_at":   session.get("executed_at"),
+        "rejected":      session["rejected"],
+        "rejected_at":   session.get("rejected_at"),
+        "reverted":      session.get("reverted", False),
+        "reverted_at":   session.get("reverted_at"),
+        "execute_token": session.get("execute_token"),   # usado pelo dashboard
+        "accounts":      session["accounts"],
     }
 
 

@@ -49,6 +49,7 @@ export interface SessionDetail {
   rejected_at?: string
   reverted: boolean
   reverted_at?: string
+  execute_token?: string   // só presente em sessões pendentes; enviado no execute
   accounts: AccountResult[]
 }
 

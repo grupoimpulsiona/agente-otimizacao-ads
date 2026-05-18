@@ -8,6 +8,7 @@ Substitui o dict em memória que era perdido a cada restart.
 import sqlite3
 import json
 import os
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -67,6 +68,7 @@ def init_db():
         for stmt in [
             "ALTER TABLE sessions ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions ADD COLUMN reverted_at TEXT",
+            "ALTER TABLE sessions ADD COLUMN execute_token TEXT",
         ]:
             try:
                 conn.execute(stmt)
@@ -86,16 +88,18 @@ def create_session(
     date_preset: str = None,
 ) -> str:
     """Persiste nova sessão + contas analisadas. Retorna created_at."""
-    created_at = datetime.now().isoformat()
+    created_at    = datetime.now().isoformat()
+    execute_token = secrets.token_hex(24)   # 48-char hex — só o dashboard sabe
     with _conn() as conn:
         conn.execute(
             """INSERT INTO sessions
-               (session_id, platform, created_at, customer_ids, account_ids, date_range, date_preset)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (session_id, platform, created_at, customer_ids, account_ids,
+                date_range, date_preset, execute_token)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (session_id, platform, created_at,
              json.dumps(customer_ids or []),
              json.dumps(account_ids or []),
-             date_range, date_preset),
+             date_range, date_preset, execute_token),
         )
         for acc in accounts:
             _insert_account(conn, session_id, acc, dry_run=True)
@@ -187,9 +191,10 @@ def get_session(session_id: str) -> Optional[dict]:
         s["customer_ids"] = json.loads(s.get("customer_ids") or "[]")
         s["account_ids"]  = json.loads(s.get("account_ids") or "[]")
         s["accounts"]     = [_account_to_api_dict(a) for a in account_rows]
-        s["executed"]     = bool(s["executed"])
-        s["rejected"]     = bool(s["rejected"])
-        s["reverted"]     = bool(s.get("reverted", 0))
+        s["executed"]      = bool(s["executed"])
+        s["rejected"]      = bool(s["rejected"])
+        s["reverted"]      = bool(s.get("reverted", 0))
+        s["execute_token"] = s.get("execute_token")   # só retornado em get_session (detalhe)
         return s
 
 

@@ -267,7 +267,7 @@ export function ApprovalDetail() {
 
   const executeMutation = useMutation({
     mutationFn: (accountActions?: Record<string, number[]>) =>
-      api.sessions.execute(sessionId!, accountActions),
+      api.sessions.execute(sessionId!, session?.execute_token, accountActions),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
       queryClient.invalidateQueries({ queryKey: ['session', sessionId] })

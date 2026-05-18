@@ -20,20 +20,6 @@
     },
     {
       "parameters": {
-        "path": "aprovar-google-ads",
-        "responseMode": "onReceived",
-        "responseData": "noData",
-        "options": {}
-      },
-      "id": "gads-002",
-      "name": "Webhook Aprovação",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1.1,
-      "position": [200, 500],
-      "webhookId": "aprovar-google-ads"
-    },
-    {
-      "parameters": {
         "method": "POST",
         "url": "http://31.97.170.137:8000/analyze/google-ads",
         "sendHeaders": true,
@@ -74,24 +60,6 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [760, 200]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=http://31.97.170.137:8000/execute/{{ $('Webhook Aprovação').item.json.query.session_id }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "x-api-key", "value": "impulsiona-agente-ads-2026-seguro" }
-          ]
-        },
-        "options": { "timeout": 600000 }
-      },
-      "id": "gads-006",
-      "name": "Executar Ações",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [480, 500]
     }
   ],
   "connections": {
@@ -100,9 +68,6 @@
     },
     "Analisar Google Ads": {
       "main": [[{ "node": "WhatsApp — Proposta", "type": "main", "index": 0 }]]
-    },
-    "Webhook Aprovação": {
-      "main": [[{ "node": "Executar Ações", "type": "main", "index": 0 }]]
     }
   },
   "active": false,
