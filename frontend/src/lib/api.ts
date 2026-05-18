@@ -1,4 +1,4 @@
-import type { SessionsResponse, SessionDetail } from '../types'
+import type { SessionsResponse, SessionDetail, ReportsResponse } from '../types'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://31.97.170.137:8000'
 const API_KEY = import.meta.env.VITE_API_KEY || ''
@@ -28,6 +28,10 @@ export const api = {
     get: (id: string) => request<SessionDetail>(`/sessions/${id}`),
     execute: (id: string) => request<{ status: string }>(`/execute/${id}`, { method: 'POST' }),
     reject: (id: string) => request<{ status: string }>(`/sessions/${id}/reject`, { method: 'POST' }),
+  },
+
+  reports: {
+    get: () => request<ReportsResponse>('/reports'),
   },
 
   analyze: {

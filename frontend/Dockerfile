@@ -7,8 +7,10 @@ COPY . .
 # As variáveis VITE_ são passadas como build args
 ARG VITE_API_URL=http://31.97.170.137:8000
 ARG VITE_API_KEY=impulsiona-agente-ads-2026-seguro
+ARG VITE_SHEETS_URL=""
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_API_KEY=$VITE_API_KEY
+ENV VITE_SHEETS_URL=$VITE_SHEETS_URL
 RUN npm run build
 
 # Stage 2 — serve com Nginx

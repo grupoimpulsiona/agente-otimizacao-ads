@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, CheckSquare, History, Settings, Zap,
-  ChevronRight, BarChart2, TrendingUp
+  ChevronRight, BarChart2, TrendingUp, FileSpreadsheet
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { getSessionStatus } from '../../types'
@@ -100,6 +100,7 @@ export function Sidebar() {
         <NavItem to="/meta-ads" icon={TrendingUp} label="Meta Ads" badge={metaPending} />
 
         <SectionLabel label="Mais" />
+        <NavItem to="/relatorios" icon={FileSpreadsheet} label="Relatórios" />
         <NavItem to="/history" icon={History} label="Histórico" />
         <NavItem to="/settings" icon={Settings} label="Configurações" />
       </nav>

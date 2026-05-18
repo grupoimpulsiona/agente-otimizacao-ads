@@ -55,6 +55,34 @@ export interface SessionsResponse {
 
 export type SessionStatus = 'pending' | 'executed' | 'rejected'
 
+// ── Relatórios ────────────────────────────────────────────────────────────────
+
+export interface ReportAccount {
+  account_id: string
+  account_name: string
+  status: string
+  actions_count: number
+  actions_detail: ActionDetail[]
+  summary: string
+}
+
+export interface ReportExecution {
+  session_id: string
+  platform: Platform
+  created_at: string
+  executed_at: string
+  total_actions: number
+  accounts: ReportAccount[]
+}
+
+export interface ReportsResponse {
+  executions: ReportExecution[]
+  total_executions: number
+  total_actions: number
+  platform_stats: Record<string, { execucoes: number; acoes: number }>
+  account_stats: { name: string; platform: string; execucoes: number; acoes: number }[]
+}
+
 export function getSessionStatus(session: SessionSummary | SessionDetail): SessionStatus {
   if (session.executed) return 'executed'
   if (session.rejected) return 'rejected'

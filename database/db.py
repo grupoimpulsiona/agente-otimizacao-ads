@@ -209,6 +209,42 @@ def list_sessions(limit: int = 500) -> list[dict]:
         return result
 
 
+def list_executed_with_details(limit: int = 500) -> list[dict]:
+    """Retorna todas as sessões executadas com actions_detail completo (para a página de relatórios)."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT session_id, platform, created_at, executed_at
+               FROM sessions
+               WHERE executed=1
+               ORDER BY executed_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            d = dict(row)
+            accs = conn.execute(
+                """SELECT account_id, account_name, status,
+                          actions_count, actions_detail, summary
+                   FROM session_accounts WHERE session_id=?""",
+                (d["session_id"],),
+            ).fetchall()
+
+            d["accounts"] = []
+            for a in accs:
+                acc = dict(a)
+                try:
+                    acc["actions_detail"] = json.loads(acc.get("actions_detail") or "[]")
+                except Exception:
+                    acc["actions_detail"] = []
+                d["accounts"].append(acc)
+
+            d["total_actions"] = sum(a["actions_count"] for a in accs)
+            result.append(d)
+        return result
+
+
 def _account_to_api_dict(row) -> dict:
     """Converte linha do SQLite para o formato AccountResult da API."""
     d = dict(row)

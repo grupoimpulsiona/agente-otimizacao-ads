@@ -7,6 +7,7 @@ import { History } from './pages/History'
 import { SettingsPage } from './pages/Settings'
 import { GoogleAdsPage } from './pages/GoogleAdsPage'
 import { MetaAdsPage } from './pages/MetaAdsPage'
+import { Relatorios } from './pages/Relatorios'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/approvals/:sessionId" element={<ApprovalDetail />} />
           <Route path="/google-ads" element={<GoogleAdsPage />} />
           <Route path="/meta-ads" element={<MetaAdsPage />} />
+          <Route path="/relatorios" element={<Relatorios />} />
           <Route path="/history" element={<History />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

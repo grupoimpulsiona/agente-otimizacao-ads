@@ -403,6 +403,42 @@ def trigger_analysis(x_api_key: Optional[str] = Header(None)):
     return {"status": "ok", "triggered": results}
 
 
+# ── Relatórios ────────────────────────────────────────────────────────────────
+
+@app.get("/reports")
+def get_reports(x_api_key: Optional[str] = Header(None)):
+    """Retorna todas as execuções com detalhes completos para a página de relatórios."""
+    _auth(x_api_key)
+    executions = db.list_executed_with_details()
+
+    # Agrega stats por plataforma e por conta
+    platform_stats: dict = {}
+    account_stats: dict  = {}
+
+    for ex in executions:
+        p = ex["platform"]
+        platform_stats.setdefault(p, {"execucoes": 0, "acoes": 0})
+        platform_stats[p]["execucoes"] += 1
+        platform_stats[p]["acoes"]     += ex["total_actions"]
+
+        for acc in ex["accounts"]:
+            name = acc.get("account_name") or acc.get("account_id", "")
+            account_stats.setdefault(name, {"platform": p, "execucoes": 0, "acoes": 0})
+            account_stats[name]["execucoes"] += 1
+            account_stats[name]["acoes"]     += acc.get("actions_count", 0)
+
+    return {
+        "executions": executions,
+        "total_executions": len(executions),
+        "total_actions": sum(e["total_actions"] for e in executions),
+        "platform_stats": platform_stats,
+        "account_stats": [
+            {"name": k, **v} for k, v in
+            sorted(account_stats.items(), key=lambda x: x[1]["acoes"], reverse=True)
+        ],
+    }
+
+
 # ── Legado (compatibilidade) ──────────────────────────────────────────────────
 
 @app.post("/optimize/google-ads")
