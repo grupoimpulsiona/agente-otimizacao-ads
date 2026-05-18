@@ -1,6 +1,15 @@
 """
 Agente especialista em Google Ads.
-Coleta dados de performance via API, decide com Claude, executa ações com guardrails.
+Coleta dados de performance via API, decide com Gemini, executa ações com guardrails.
+
+Sinais coletados (pré-fetch antes do Gemini):
+  - Campanhas: impressões, cliques, CTR, CPC, CPA, ROAS, IS
+  - Keywords: CTR, CPC, CPA, lance atual, bid strategy
+  - Search Terms: termos reais com custo e conversões
+  - Quality Score: QS por keyword + componentes (ETR, Ad Relevance, LP Experience)
+  - Impression Share + Bid Strategy: IS, IS perdida por budget/rank, tipo de bidding
+  - Ad Performance: RSA ad strength + métricas por anúncio
+  - Device Breakdown: métricas por dispositivo (MOBILE/DESKTOP/TABLET)
 """
 
 import time
@@ -24,24 +33,27 @@ log = get_logger("google_ads_agent")
 
 PLATFORM = "Google Ads"
 
-# ─── Tools disponíveis para o Claude ────────────────────────────────────────
+_OPTIMIZATION_TOOLS = {"pause_keyword", "update_keyword_bid", "add_negative_keyword"}
+
+# ─── Tools disponíveis para o Gemini ─────────────────────────────────────────
 
 TOOLS_SCHEMA = [
+    # ── Leitura de dados (fallback — normalmente dados já vêm pré-carregados) ─
     {
         "name": "get_campaign_performance",
-        "description": "Retorna métricas de performance de todas as campanhas ativas (CTR, CPC, CPA, ROAS, impressões, cliques, conversões, custo).",
+        "description": "Retorna métricas de performance de todas as campanhas ativas (CTR, CPC, CPA, ROAS, impressões, cliques, conversões, custo, impression share). Use somente se precisar de dados específicos não cobertos pelo contexto inicial.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string", "description": "ID da conta Google Ads"},
-                "date_range": {"type": "string", "enum": ["LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS"], "description": "Período de análise"},
+                "date_range": {"type": "string", "enum": ["LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS"]},
             },
             "required": ["customer_id", "date_range"],
         },
     },
     {
         "name": "get_keyword_performance",
-        "description": "Retorna performance detalhada de keywords por campanha e ad group.",
+        "description": "Retorna performance detalhada de keywords (CTR, CPC, CPA, lances, match type). Use somente se precisar de dados de keywords não cobertos pelo contexto inicial.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -54,20 +66,21 @@ TOOLS_SCHEMA = [
     },
     {
         "name": "get_search_terms_report",
-        "description": "Retorna os termos de busca reais que ativaram os anúncios. Útil para identificar termos irrelevantes a negativar.",
+        "description": "Retorna termos de busca reais que ativaram os anúncios. Use somente se precisar de drill-down adicional nos termos.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string"},
                 "date_range": {"type": "string", "enum": ["LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS"]},
-                "min_impressions": {"type": "integer", "description": "Mínimo de impressões para retornar o termo (padrão: 10)"},
+                "min_impressions": {"type": "integer", "description": "Mínimo de impressões para retornar o termo"},
             },
             "required": ["customer_id", "date_range"],
         },
     },
+    # ── Ações de otimização ──────────────────────────────────────────────────
     {
         "name": "pause_keyword",
-        "description": "Pausa uma keyword específica que está desperdiçando verba.",
+        "description": "Pausa uma keyword que está desperdiçando verba (CTR muito baixo, sem conversão e gasto acima do limiar). NUNCA use em campanhas com Smart Bidding automático (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS) sem verificar primeiro.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -75,14 +88,14 @@ TOOLS_SCHEMA = [
                 "ad_group_id": {"type": "string"},
                 "keyword_id": {"type": "string"},
                 "keyword_text": {"type": "string", "description": "Texto da keyword (para o log)"},
-                "reason": {"type": "string", "description": "Motivo da pausa"},
+                "reason": {"type": "string", "description": "Justificativa com dados específicos: CTR, impressões, custo, conversões"},
             },
             "required": ["customer_id", "ad_group_id", "keyword_id", "keyword_text", "reason"],
         },
     },
     {
         "name": "update_keyword_bid",
-        "description": "Atualiza o lance (CPC máximo) de uma keyword. Não pode aumentar orçamento.",
+        "description": "Atualiza o CPC máximo de uma keyword. SOMENTE use em campanhas com lance MANUAL (Manual CPC). NUNCA use em campanhas com Smart Bidding (TARGET_CPA, TARGET_ROAS, MAXIMIZE_CONVERSIONS, MAXIMIZE_CONVERSION_VALUE) — o algoritmo gerencia automaticamente.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -92,22 +105,26 @@ TOOLS_SCHEMA = [
                 "keyword_text": {"type": "string"},
                 "current_bid_micros": {"type": "integer", "description": "Lance atual em micros (1 real = 1.000.000 micros)"},
                 "new_bid_micros": {"type": "integer", "description": "Novo lance proposto em micros"},
-                "reason": {"type": "string"},
+                "reason": {"type": "string", "description": "Justificativa com CPA atual, meta de CPA e bid strategy confirmada como manual"},
             },
             "required": ["customer_id", "ad_group_id", "keyword_id", "keyword_text", "current_bid_micros", "new_bid_micros", "reason"],
         },
     },
     {
         "name": "add_negative_keyword",
-        "description": "Adiciona uma keyword negativa a uma campanha para evitar tráfego irrelevante.",
+        "description": "Adiciona uma keyword negativa em uma campanha para bloquear tráfego irrelevante ou de baixa intenção.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "customer_id": {"type": "string"},
                 "campaign_id": {"type": "string"},
                 "keyword_text": {"type": "string"},
-                "match_type": {"type": "string", "enum": ["EXACT", "PHRASE", "BROAD"], "description": "Tipo de correspondência (padrão: PHRASE)"},
-                "reason": {"type": "string"},
+                "match_type": {
+                    "type": "string",
+                    "enum": ["EXACT", "PHRASE", "BROAD"],
+                    "description": "PHRASE para termos específicos irrelevantes; BROAD para termos muito genéricos",
+                },
+                "reason": {"type": "string", "description": "Justificativa com cliques, custo e por que o termo é irrelevante"},
             },
             "required": ["customer_id", "campaign_id", "keyword_text", "match_type", "reason"],
         },
@@ -129,20 +146,8 @@ def _get_client() -> GoogleAdsClient:
     return GoogleAdsClient.load_from_dict(config)
 
 
-_OPTIMIZATION_TOOLS = {"pause_keyword", "update_keyword_bid", "add_negative_keyword"}
-
-
-def _get_account_name(client: GoogleAdsClient, customer_id: str) -> str:
-    """Busca o nome descritivo da conta Google Ads."""
-    try:
-        rows = _run_query(client, customer_id, "SELECT customer.descriptive_name FROM customer LIMIT 1")
-        return rows[0].customer.descriptive_name if rows else ""
-    except Exception:
-        return ""
-
-
-def _run_query(client: GoogleAdsClient, customer_id: str, query: str) -> list[dict]:
-    """Executa GAQL com retry automático."""
+def _run_query(client: GoogleAdsClient, customer_id: str, query: str) -> list:
+    """Executa GAQL com retry automático em backoff exponencial."""
     ga_service = client.get_service("GoogleAdsService")
     for attempt in range(1, 5):
         try:
@@ -157,7 +162,16 @@ def _run_query(client: GoogleAdsClient, customer_id: str, query: str) -> list[di
     return []
 
 
-# ─── Implementação das tools ─────────────────────────────────────────────────
+# ─── Pré-fetch: funções de coleta de dados ───────────────────────────────────
+
+def _get_account_name(client: GoogleAdsClient, customer_id: str) -> str:
+    """Busca o nome descritivo da conta."""
+    try:
+        rows = _run_query(client, customer_id, "SELECT customer.descriptive_name FROM customer LIMIT 1")
+        return rows[0].customer.descriptive_name if rows else ""
+    except Exception:
+        return ""
+
 
 def _get_campaign_performance(client: GoogleAdsClient, customer_id: str, date_range: str) -> list[dict]:
     query = f"""
@@ -179,12 +193,12 @@ def _get_campaign_performance(client: GoogleAdsClient, customer_id: str, date_ra
             "campaign_name": row.campaign.name,
             "impressions": row.metrics.impressions,
             "clicks": row.metrics.clicks,
-            "cost_brl": row.metrics.cost_micros / 1e6,
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
             "ctr": round(row.metrics.ctr, 4),
-            "avg_cpc_brl": row.metrics.average_cpc / 1e6,
-            "conversions": row.metrics.conversions,
-            "cpa_brl": row.metrics.cost_per_conversion / 1e6 if row.metrics.conversions > 0 else None,
-            "conversion_value": row.metrics.conversions_value,
+            "avg_cpc_brl": round(row.metrics.average_cpc / 1e6, 2),
+            "conversions": round(row.metrics.conversions, 2),
+            "cpa_brl": round(row.metrics.cost_per_conversion / 1e6, 2) if row.metrics.conversions > 0 else None,
+            "conversion_value": round(row.metrics.conversions_value, 2),
             "roas": round(row.metrics.conversions_value / (row.metrics.cost_micros / 1e6), 2) if row.metrics.cost_micros > 0 else 0,
             "impression_share": round(row.metrics.search_impression_share, 3),
         }
@@ -202,6 +216,7 @@ def _get_keyword_performance(client: GoogleAdsClient, customer_id: str, date_ran
             ad_group_criterion.keyword.text,
             ad_group_criterion.keyword.match_type,
             ad_group_criterion.cpc_bid_micros,
+            ad_group_criterion.status,
             metrics.impressions, metrics.clicks, metrics.cost_micros,
             metrics.ctr, metrics.conversions, metrics.cost_per_conversion
         FROM keyword_view
@@ -222,14 +237,15 @@ def _get_keyword_performance(client: GoogleAdsClient, customer_id: str, date_ran
             "keyword_id": str(row.ad_group_criterion.criterion_id),
             "keyword_text": row.ad_group_criterion.keyword.text,
             "match_type": row.ad_group_criterion.keyword.match_type.name,
+            "status": row.ad_group_criterion.status.name,
             "current_bid_micros": row.ad_group_criterion.cpc_bid_micros,
-            "current_bid_brl": row.ad_group_criterion.cpc_bid_micros / 1e6,
+            "current_bid_brl": round(row.ad_group_criterion.cpc_bid_micros / 1e6, 2),
             "impressions": row.metrics.impressions,
             "clicks": row.metrics.clicks,
-            "cost_brl": row.metrics.cost_micros / 1e6,
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
             "ctr": round(row.metrics.ctr, 4),
-            "conversions": row.metrics.conversions,
-            "cpa_brl": row.metrics.cost_per_conversion / 1e6 if row.metrics.conversions > 0 else None,
+            "conversions": round(row.metrics.conversions, 2),
+            "cpa_brl": round(row.metrics.cost_per_conversion / 1e6, 2) if row.metrics.conversions > 0 else None,
         }
         for row in rows
     ]
@@ -256,13 +272,178 @@ def _get_search_terms(client: GoogleAdsClient, customer_id: str, date_range: str
             "campaign_name": row.campaign.name,
             "impressions": row.metrics.impressions,
             "clicks": row.metrics.clicks,
-            "cost_brl": row.metrics.cost_micros / 1e6,
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
             "ctr": round(row.metrics.ctr, 4),
-            "conversions": row.metrics.conversions,
+            "conversions": round(row.metrics.conversions, 2),
         }
         for row in rows
     ]
 
+
+def _get_quality_scores(client: GoogleAdsClient, customer_id: str, date_range: str) -> list[dict]:
+    """
+    Quality Score por keyword com componentes detalhados.
+    QS disponível via ad_group_criterion.quality_info (só para keywords ativas com dados suficientes).
+    """
+    query = f"""
+        SELECT
+            campaign.id, campaign.name,
+            ad_group.id, ad_group.name,
+            ad_group_criterion.criterion_id,
+            ad_group_criterion.keyword.text,
+            ad_group_criterion.quality_info.quality_score,
+            ad_group_criterion.quality_info.search_predicted_ctr,
+            ad_group_criterion.quality_info.ad_relevance,
+            ad_group_criterion.quality_info.landing_page_experience,
+            metrics.impressions, metrics.clicks, metrics.cost_micros
+        FROM keyword_view
+        WHERE ad_group_criterion.status != 'REMOVED'
+          AND campaign.status = 'ENABLED'
+          AND segments.date DURING {date_range}
+          AND ad_group_criterion.quality_info.quality_score > 0
+        ORDER BY ad_group_criterion.quality_info.quality_score ASC, metrics.cost_micros DESC
+        LIMIT 100
+    """
+    rows = _run_query(client, customer_id, query)
+    results = []
+    for row in rows:
+        qs = row.ad_group_criterion.quality_info.quality_score
+        if qs and qs > 0:
+            results.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "ad_group_id": str(row.ad_group.id),
+                "ad_group_name": row.ad_group.name,
+                "keyword_id": str(row.ad_group_criterion.criterion_id),
+                "keyword_text": row.ad_group_criterion.keyword.text,
+                "quality_score": qs,
+                "search_predicted_ctr": row.ad_group_criterion.quality_info.search_predicted_ctr.name,
+                "ad_relevance": row.ad_group_criterion.quality_info.ad_relevance.name,
+                "landing_page_experience": row.ad_group_criterion.quality_info.landing_page_experience.name,
+                "impressions": row.metrics.impressions,
+                "clicks": row.metrics.clicks,
+                "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
+            })
+    return results
+
+
+def _get_impression_share_and_strategy(client: GoogleAdsClient, customer_id: str, date_range: str) -> list[dict]:
+    """
+    Impression Share + tipo de bid strategy por campanha.
+    Essencial para detectar Smart Bidding e IS perdida por rank vs. budget.
+    """
+    query = f"""
+        SELECT
+            campaign.id, campaign.name,
+            campaign.bidding_strategy_type,
+            metrics.impressions, metrics.clicks, metrics.cost_micros,
+            metrics.search_impression_share,
+            metrics.search_budget_lost_impression_share,
+            metrics.search_rank_lost_impression_share,
+            metrics.search_top_impression_share,
+            metrics.search_absolute_top_impression_share
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+          AND segments.date DURING {date_range}
+        ORDER BY metrics.cost_micros DESC
+    """
+    rows = _run_query(client, customer_id, query)
+    return [
+        {
+            "campaign_id": str(row.campaign.id),
+            "campaign_name": row.campaign.name,
+            "bid_strategy_type": row.campaign.bidding_strategy_type.name,
+            "is_smart_bidding": row.campaign.bidding_strategy_type.name in (
+                "TARGET_CPA", "TARGET_ROAS", "MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSION_VALUE"
+            ),
+            "impressions": row.metrics.impressions,
+            "clicks": row.metrics.clicks,
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
+            "impression_share": round(row.metrics.search_impression_share, 3),
+            "is_lost_budget": round(row.metrics.search_budget_lost_impression_share, 3),
+            "is_lost_rank": round(row.metrics.search_rank_lost_impression_share, 3),
+            "top_impression_share": round(row.metrics.search_top_impression_share, 3),
+            "abs_top_impression_share": round(row.metrics.search_absolute_top_impression_share, 3),
+        }
+        for row in rows
+    ]
+
+
+def _get_ad_performance(client: GoogleAdsClient, customer_id: str, date_range: str) -> list[dict]:
+    """
+    Performance de anúncios RSA com Ad Strength.
+    Identifica anúncios com Ad Strength Poor/Average e baixo CTR.
+    """
+    query = f"""
+        SELECT
+            campaign.id, campaign.name,
+            ad_group.id, ad_group.name,
+            ad_group_ad.ad.id,
+            ad_group_ad.ad_strength,
+            ad_group_ad.status,
+            metrics.impressions, metrics.clicks, metrics.ctr,
+            metrics.cost_micros, metrics.conversions
+        FROM ad_group_ad
+        WHERE ad_group_ad.status = 'ENABLED'
+          AND campaign.status = 'ENABLED'
+          AND segments.date DURING {date_range}
+        ORDER BY metrics.impressions DESC
+        LIMIT 100
+    """
+    rows = _run_query(client, customer_id, query)
+    return [
+        {
+            "campaign_id": str(row.campaign.id),
+            "campaign_name": row.campaign.name,
+            "ad_group_id": str(row.ad_group.id),
+            "ad_group_name": row.ad_group.name,
+            "ad_id": str(row.ad_group_ad.ad.id),
+            "ad_strength": row.ad_group_ad.ad_strength.name,
+            "impressions": row.metrics.impressions,
+            "clicks": row.metrics.clicks,
+            "ctr": round(row.metrics.ctr, 4),
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
+            "conversions": round(row.metrics.conversions, 2),
+        }
+        for row in rows
+    ]
+
+
+def _get_device_breakdown(client: GoogleAdsClient, customer_id: str, date_range: str) -> list[dict]:
+    """
+    Performance por dispositivo (MOBILE / DESKTOP / TABLET) por campanha.
+    Útil para identificar disparidade de performance mobile vs. desktop.
+    """
+    query = f"""
+        SELECT
+            campaign.id, campaign.name,
+            segments.device,
+            metrics.impressions, metrics.clicks, metrics.cost_micros,
+            metrics.ctr, metrics.conversions, metrics.cost_per_conversion
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+          AND segments.date DURING {date_range}
+          AND segments.device IN ('DESKTOP', 'MOBILE', 'TABLET')
+        ORDER BY campaign.id, metrics.cost_micros DESC
+    """
+    rows = _run_query(client, customer_id, query)
+    return [
+        {
+            "campaign_id": str(row.campaign.id),
+            "campaign_name": row.campaign.name,
+            "device": row.segments.device.name,
+            "impressions": row.metrics.impressions,
+            "clicks": row.metrics.clicks,
+            "cost_brl": round(row.metrics.cost_micros / 1e6, 2),
+            "ctr": round(row.metrics.ctr, 4),
+            "conversions": round(row.metrics.conversions, 2),
+            "cpa_brl": round(row.metrics.cost_per_conversion / 1e6, 2) if row.metrics.conversions > 0 else None,
+        }
+        for row in rows
+    ]
+
+
+# ─── Ações de otimização (mutations) ─────────────────────────────────────────
 
 def _pause_keyword(client: GoogleAdsClient, customer_id: str, ad_group_id: str, keyword_id: str) -> dict:
     ag_criterion_service = client.get_service("AdGroupCriterionService")
@@ -363,14 +544,58 @@ def _make_tool_executor(client: GoogleAdsClient, actions_counter: list):
     return execute
 
 
+# ─── Pré-fetch com tolerância a falhas ───────────────────────────────────────
+
+def _safe_fetch(name: str, fn, *args, **kwargs):
+    """Executa uma função de pré-fetch com tratamento de erro isolado."""
+    try:
+        result = fn(*args, **kwargs)
+        log.info(f"[prefetch] {name}: {len(result)} registros")
+        return result
+    except Exception as e:
+        log.warning(f"[prefetch] {name}: falhou — {e}")
+        return []
+
+
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 def run(customer_id: str, date_range: str = "LAST_7_DAYS") -> dict:
-    log.info(f"[Google Ads] Iniciando agente | conta={customer_id} | período={date_range} | dry_run={settings.dry_run}")
+    log.info(f"[Google Ads] Iniciando | conta={customer_id} | período={date_range} | dry_run={settings.dry_run}")
 
     try:
         ads_client = _get_client()
         account_name = _get_account_name(ads_client, customer_id)
+        client_config = settings.get_google_account_config(customer_id)
+
+        log.info(f"[Google Ads] Conta: '{account_name}' | CPA meta: R${client_config['target_cpa']:.2f} | ROAS meta: {client_config['target_roas']:.1f}x")
+
+        # ── Pré-fetch completo de todos os sinais ─────────────────────────────
+        log.info(f"[Google Ads] Iniciando pré-fetch de dados...")
+        prefetched_data = {
+            "campaigns": _safe_fetch(
+                "campaigns", _get_campaign_performance, ads_client, customer_id, date_range
+            ),
+            "keywords": _safe_fetch(
+                "keywords", _get_keyword_performance, ads_client, customer_id, date_range
+            ),
+            "search_terms": _safe_fetch(
+                "search_terms", _get_search_terms, ads_client, customer_id, date_range
+            ),
+            "quality_scores": _safe_fetch(
+                "quality_scores", _get_quality_scores, ads_client, customer_id, date_range
+            ),
+            "impression_share": _safe_fetch(
+                "impression_share", _get_impression_share_and_strategy, ads_client, customer_id, date_range
+            ),
+            "ad_performance": _safe_fetch(
+                "ad_performance", _get_ad_performance, ads_client, customer_id, date_range
+            ),
+            "device_breakdown": _safe_fetch(
+                "device_breakdown", _get_device_breakdown, ads_client, customer_id, date_range
+            ),
+        }
+        log.info(f"[Google Ads] Pré-fetch concluído. Enviando ao Gemini...")
+
         actions_counter: list = []
         executor = _make_tool_executor(ads_client, actions_counter)
 
@@ -379,6 +604,8 @@ def run(customer_id: str, date_range: str = "LAST_7_DAYS") -> dict:
             performance_data={"customer_id": customer_id, "date_range": date_range},
             tools_schema=TOOLS_SCHEMA,
             tool_executor=executor,
+            client_config=client_config,
+            prefetched_data=prefetched_data,
         )
 
         # Filtra apenas ações de otimização (exclui consultas de dados)

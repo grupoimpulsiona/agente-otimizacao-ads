@@ -1,6 +1,13 @@
 """
 Agente especialista em Meta Ads (Facebook + Instagram).
-Coleta dados via Marketing API, decide com Claude, executa com guardrails.
+Coleta dados via Marketing API, decide com Gemini, executa com guardrails.
+
+Sinais coletados (pré-fetch antes do Gemini):
+  - Campanhas: impressões, cliques, CTR, CPM, CPC, conversões, CPA, ROAS, gasto
+  - Ad Sets: métricas + frequência (sinal de fadiga de audiência)
+  - Ads: performance por criativo individual
+  - Placements: breakdown por publisher_platform + platform_position
+  - Demographics: breakdown por idade e gênero
 """
 
 import time
@@ -26,76 +33,78 @@ META_BASE = f"https://graph.facebook.com/{META_API_VERSION}"
 
 _OPTIMIZATION_TOOLS = {"pause_ad_set", "pause_ad", "update_ad_set_bid"}
 
-# ─── Tools disponíveis para o Claude ─────────────────────────────────────────
+# ─── Tools disponíveis para o Gemini ─────────────────────────────────────────
 
 TOOLS_SCHEMA = [
+    # ── Leitura de dados (fallback — normalmente dados já vêm pré-carregados) ─
     {
         "name": "get_campaigns_performance",
-        "description": "Retorna métricas de performance de todas as campanhas ativas: impressões, cliques, CTR, CPM, CPC, conversões, CPA, ROAS, gasto.",
+        "description": "Retorna métricas de campanhas ativas. Use somente para drill-down adicional não coberto pelos dados iniciais.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "ad_account_id": {"type": "string", "description": "ID da conta de anúncios (ex: act_123456)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"]},
             },
             "required": ["ad_account_id", "date_preset"],
         },
     },
     {
         "name": "get_ad_sets_performance",
-        "description": "Retorna métricas detalhadas por ad set, incluindo frequência e audience saturation.",
+        "description": "Retorna métricas por ad set com frequência e audience saturation. Use somente para drill-down.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "ad_account_id": {"type": "string"},
                 "campaign_id": {"type": "string", "description": "Filtrar por campanha (opcional)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"]},
             },
             "required": ["ad_account_id", "date_preset"],
         },
     },
     {
         "name": "get_ads_performance",
-        "description": "Retorna performance por anúncio individual, incluindo CTR, frequência e gasto.",
+        "description": "Retorna performance por anúncio individual. Use somente para drill-down.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "ad_account_id": {"type": "string"},
                 "ad_set_id": {"type": "string", "description": "Filtrar por ad set (opcional)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"]},
             },
             "required": ["ad_account_id", "date_preset"],
         },
     },
+    # ── Ações de otimização ──────────────────────────────────────────────────
     {
         "name": "pause_ad_set",
-        "description": "Pausa um ad set com performance ruim ou audiência fatigada.",
+        "description": "Pausa um ad set com performance ruim ou audiência fatigada (frequência alta + CTR baixo + CPA acima da meta).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "ad_set_id": {"type": "string"},
                 "ad_set_name": {"type": "string", "description": "Nome do ad set (para o log)"},
-                "reason": {"type": "string"},
+                "reason": {"type": "string", "description": "Justificativa com dados: frequência, CTR, CPA atual, meta de CPA"},
             },
             "required": ["ad_set_id", "ad_set_name", "reason"],
         },
     },
     {
         "name": "pause_ad",
-        "description": "Pausa um anúncio específico com baixa performance.",
+        "description": "Pausa um anúncio específico com baixo CTR ou saturação por frequência.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "ad_id": {"type": "string"},
                 "ad_name": {"type": "string"},
-                "reason": {"type": "string"},
+                "reason": {"type": "string", "description": "Justificativa com dados: CTR, frequência, gasto sem conversão"},
             },
             "required": ["ad_id", "ad_name", "reason"],
         },
     },
     {
         "name": "update_ad_set_bid",
-        "description": "Atualiza o lance de um ad set. Não pode aumentar orçamento.",
+        "description": "Atualiza o lance de um ad set. Use para reduzir lance quando CPA está acima da meta com dados estatisticamente válidos (> 500 impressões). Não pode aumentar orçamento.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -103,7 +112,7 @@ TOOLS_SCHEMA = [
                 "ad_set_name": {"type": "string"},
                 "current_bid_amount": {"type": "number", "description": "Lance atual em centavos"},
                 "new_bid_amount": {"type": "number", "description": "Novo lance proposto em centavos"},
-                "reason": {"type": "string"},
+                "reason": {"type": "string", "description": "Justificativa com CPA atual, meta e impressões disponíveis"},
             },
             "required": ["ad_set_id", "ad_set_name", "current_bid_amount", "new_bid_amount", "reason"],
         },
@@ -112,15 +121,6 @@ TOOLS_SCHEMA = [
 
 
 # ─── Chamadas à Meta Marketing API ───────────────────────────────────────────
-
-def _get_account_name(ad_account_id: str) -> str:
-    """Busca o nome da conta Meta Ads."""
-    try:
-        data = _meta_get(ad_account_id, {"fields": "name"})
-        return data.get("name", "")
-    except Exception:
-        return ""
-
 
 def _meta_get(endpoint: str, params: dict) -> dict:
     params["access_token"] = settings.meta_access_token
@@ -157,11 +157,24 @@ def _meta_post(endpoint: str, payload: dict) -> dict:
 INSIGHTS_FIELDS = "campaign_id,campaign_name,impressions,clicks,ctr,cpm,cpc,spend,actions,action_values,frequency,reach"
 
 
-def _parse_conversions(actions_data: list) -> tuple[float, float]:
-    conversions = sum(float(a["value"]) for a in (actions_data or []) if a["action_type"] in ("purchase", "lead", "complete_registration"))
-    conv_value = 0.0
-    return conversions, conv_value
+def _parse_conversions(actions_data: list) -> float:
+    """Soma conversões relevantes (purchase, lead, complete_registration)."""
+    return sum(
+        float(a["value"]) for a in (actions_data or [])
+        if a["action_type"] in ("purchase", "lead", "complete_registration", "onsite_conversion.lead_grouped")
+    )
 
+
+def _get_account_name(ad_account_id: str) -> str:
+    """Busca o nome da conta Meta Ads."""
+    try:
+        data = _meta_get(ad_account_id, {"fields": "name"})
+        return data.get("name", "")
+    except Exception:
+        return ""
+
+
+# ─── Pré-fetch: funções de coleta de dados ───────────────────────────────────
 
 def _get_campaigns_performance(ad_account_id: str, date_preset: str) -> list[dict]:
     data = _meta_get(f"{ad_account_id}/insights", {
@@ -173,20 +186,21 @@ def _get_campaigns_performance(ad_account_id: str, date_preset: str) -> list[dic
     })
     results = []
     for row in data.get("data", []):
-        conversions, _ = _parse_conversions(row.get("actions", []))
+        conversions = _parse_conversions(row.get("actions", []))
         spend = float(row.get("spend", 0))
         results.append({
             "campaign_id": row.get("campaign_id"),
             "campaign_name": row.get("campaign_name"),
             "impressions": int(row.get("impressions", 0)),
             "clicks": int(row.get("clicks", 0)),
-            "ctr": float(row.get("ctr", 0)),
-            "cpm": float(row.get("cpm", 0)),
-            "cpc": float(row.get("cpc", 0)),
-            "spend_brl": spend,
-            "conversions": conversions,
-            "cpa_brl": spend / conversions if conversions > 0 else None,
-            "frequency": float(row.get("frequency", 0)),
+            "ctr": round(float(row.get("ctr", 0)), 4),
+            "cpm": round(float(row.get("cpm", 0)), 2),
+            "cpc": round(float(row.get("cpc", 0)), 2),
+            "spend_brl": round(spend, 2),
+            "conversions": round(conversions, 2),
+            "cpa_brl": round(spend / conversions, 2) if conversions > 0 else None,
+            "frequency": round(float(row.get("frequency", 0)), 2),
+            "reach": int(row.get("reach", 0)),
         })
     return results
 
@@ -205,20 +219,22 @@ def _get_ad_sets_performance(ad_account_id: str, date_preset: str, campaign_id: 
     data = _meta_get(f"{ad_account_id}/insights", params)
     results = []
     for row in data.get("data", []):
-        conversions, _ = _parse_conversions(row.get("actions", []))
+        conversions = _parse_conversions(row.get("actions", []))
         spend = float(row.get("spend", 0))
         results.append({
             "ad_set_id": row.get("adset_id"),
             "ad_set_name": row.get("adset_name"),
             "campaign_id": row.get("campaign_id"),
+            "campaign_name": row.get("campaign_name"),
             "impressions": int(row.get("impressions", 0)),
             "clicks": int(row.get("clicks", 0)),
-            "ctr": float(row.get("ctr", 0)),
-            "cpm": float(row.get("cpm", 0)),
-            "spend_brl": spend,
-            "conversions": conversions,
-            "cpa_brl": spend / conversions if conversions > 0 else None,
-            "frequency": float(row.get("frequency", 0)),
+            "ctr": round(float(row.get("ctr", 0)), 4),
+            "cpm": round(float(row.get("cpm", 0)), 2),
+            "spend_brl": round(spend, 2),
+            "conversions": round(conversions, 2),
+            "cpa_brl": round(spend / conversions, 2) if conversions > 0 else None,
+            "frequency": round(float(row.get("frequency", 0)), 2),
+            "reach": int(row.get("reach", 0)),
         })
     return results
 
@@ -236,20 +252,88 @@ def _get_ads_performance(ad_account_id: str, date_preset: str, ad_set_id: str = 
     data = _meta_get(f"{ad_account_id}/insights", params)
     results = []
     for row in data.get("data", []):
-        conversions, _ = _parse_conversions(row.get("actions", []))
+        conversions = _parse_conversions(row.get("actions", []))
         spend = float(row.get("spend", 0))
         results.append({
             "ad_id": row.get("ad_id"),
             "ad_name": row.get("ad_name"),
             "impressions": int(row.get("impressions", 0)),
             "clicks": int(row.get("clicks", 0)),
-            "ctr": float(row.get("ctr", 0)),
-            "spend_brl": spend,
-            "conversions": conversions,
-            "frequency": float(row.get("frequency", 0)),
+            "ctr": round(float(row.get("ctr", 0)), 4),
+            "spend_brl": round(spend, 2),
+            "conversions": round(conversions, 2),
+            "cpa_brl": round(spend / conversions, 2) if conversions > 0 else None,
+            "frequency": round(float(row.get("frequency", 0)), 2),
         })
     return results
 
+
+def _get_placement_breakdown(ad_account_id: str, date_preset: str) -> list[dict]:
+    """
+    Breakdown por placement: publisher_platform (facebook, instagram, audience_network)
+    + platform_position (feed, story, reels, etc.).
+    """
+    data = _meta_get(f"{ad_account_id}/insights", {
+        "level": "account",
+        "date_preset": date_preset,
+        "fields": "impressions,clicks,spend,ctr,cpm,actions",
+        "breakdowns": "publisher_platform,platform_position",
+        "limit": 100,
+    })
+    results = []
+    for row in data.get("data", []):
+        conversions = _parse_conversions(row.get("actions", []))
+        spend = float(row.get("spend", 0))
+        if spend < 0.5:  # ignora placements com gasto irrelevante
+            continue
+        results.append({
+            "publisher_platform": row.get("publisher_platform", "unknown"),
+            "platform_position": row.get("platform_position", "unknown"),
+            "impressions": int(row.get("impressions", 0)),
+            "clicks": int(row.get("clicks", 0)),
+            "ctr": round(float(row.get("ctr", 0)), 4),
+            "cpm": round(float(row.get("cpm", 0)), 2),
+            "spend_brl": round(spend, 2),
+            "conversions": round(conversions, 2),
+            "cpa_brl": round(spend / conversions, 2) if conversions > 0 else None,
+        })
+    # Ordena por gasto decrescente
+    return sorted(results, key=lambda x: x["spend_brl"], reverse=True)
+
+
+def _get_demographic_breakdown(ad_account_id: str, date_preset: str) -> list[dict]:
+    """
+    Breakdown por faixa etária e gênero.
+    Útil para identificar segmentos demográficos com CPA muito acima da meta.
+    """
+    data = _meta_get(f"{ad_account_id}/insights", {
+        "level": "account",
+        "date_preset": date_preset,
+        "fields": "impressions,clicks,spend,ctr,cpm,actions",
+        "breakdowns": "age,gender",
+        "limit": 100,
+    })
+    results = []
+    for row in data.get("data", []):
+        conversions = _parse_conversions(row.get("actions", []))
+        spend = float(row.get("spend", 0))
+        if spend < 1.0:  # ignora segmentos com gasto irrelevante
+            continue
+        results.append({
+            "age": row.get("age", "unknown"),
+            "gender": row.get("gender", "unknown"),
+            "impressions": int(row.get("impressions", 0)),
+            "clicks": int(row.get("clicks", 0)),
+            "ctr": round(float(row.get("ctr", 0)), 4),
+            "cpm": round(float(row.get("cpm", 0)), 2),
+            "spend_brl": round(spend, 2),
+            "conversions": round(conversions, 2),
+            "cpa_brl": round(spend / conversions, 2) if conversions > 0 else None,
+        })
+    return sorted(results, key=lambda x: x["spend_brl"], reverse=True)
+
+
+# ─── Ações de otimização (mutations) ─────────────────────────────────────────
 
 def _pause_ad_set(ad_set_id: str) -> dict:
     return _meta_post(ad_set_id, {"status": "PAUSED"})
@@ -263,7 +347,7 @@ def _update_ad_set_bid(ad_set_id: str, new_bid_amount: int) -> dict:
     return _meta_post(ad_set_id, {"bid_amount": new_bid_amount})
 
 
-# ─── Executor de tools com guardrails ────────────────────────────────────────
+# ─── Executor de tools (com guardrails) ─────────────────────────────────────
 
 def _make_tool_executor(actions_counter: list):
     def execute(tool_name: str, inp: dict) -> Any:
@@ -296,7 +380,11 @@ def _make_tool_executor(actions_counter: list):
                 inp["current_bid_amount"], inp["new_bid_amount"],
                 settings.max_bid_change_pct, inp["ad_set_name"]
             )
-            result = {"skipped": "dry_run", "adjusted_bid": int(adjusted)} if settings.dry_run else _update_ad_set_bid(inp["ad_set_id"], int(adjusted))
+            result = (
+                {"skipped": "dry_run", "adjusted_bid": int(adjusted)}
+                if settings.dry_run
+                else _update_ad_set_bid(inp["ad_set_id"], int(adjusted))
+            )
             log_action(PLATFORM, "update_ad_set_bid", inp["ad_set_id"], inp, str(result), settings.dry_run)
             actions_counter.append(1)
             return result
@@ -306,13 +394,51 @@ def _make_tool_executor(actions_counter: list):
     return execute
 
 
+# ─── Pré-fetch com tolerância a falhas ───────────────────────────────────────
+
+def _safe_fetch(name: str, fn, *args, **kwargs):
+    """Executa uma função de pré-fetch com tratamento de erro isolado."""
+    try:
+        result = fn(*args, **kwargs)
+        log.info(f"[prefetch] {name}: {len(result)} registros")
+        return result
+    except Exception as e:
+        log.warning(f"[prefetch] {name}: falhou — {e}")
+        return []
+
+
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 def run(ad_account_id: str, date_preset: str = "last_7d") -> dict:
-    log.info(f"[Meta Ads] Iniciando agente | conta={ad_account_id} | período={date_preset} | dry_run={settings.dry_run}")
+    log.info(f"[Meta Ads] Iniciando | conta={ad_account_id} | período={date_preset} | dry_run={settings.dry_run}")
 
     try:
         account_name = _get_account_name(ad_account_id)
+        client_config = settings.get_meta_account_config(ad_account_id)
+
+        log.info(f"[Meta Ads] Conta: '{account_name}' | CPA meta: R${client_config['target_cpa']:.2f} | ROAS meta: {client_config['target_roas']:.1f}x")
+
+        # ── Pré-fetch completo de todos os sinais ─────────────────────────────
+        log.info(f"[Meta Ads] Iniciando pré-fetch de dados...")
+        prefetched_data = {
+            "campaigns": _safe_fetch(
+                "campaigns", _get_campaigns_performance, ad_account_id, date_preset
+            ),
+            "ad_sets": _safe_fetch(
+                "ad_sets", _get_ad_sets_performance, ad_account_id, date_preset
+            ),
+            "ads": _safe_fetch(
+                "ads", _get_ads_performance, ad_account_id, date_preset
+            ),
+            "placements": _safe_fetch(
+                "placements", _get_placement_breakdown, ad_account_id, date_preset
+            ),
+            "demographics": _safe_fetch(
+                "demographics", _get_demographic_breakdown, ad_account_id, date_preset
+            ),
+        }
+        log.info(f"[Meta Ads] Pré-fetch concluído. Enviando ao Gemini...")
+
         actions_counter: list = []
         executor = _make_tool_executor(actions_counter)
 
@@ -321,6 +447,8 @@ def run(ad_account_id: str, date_preset: str = "last_7d") -> dict:
             performance_data={"ad_account_id": ad_account_id, "date_preset": date_preset},
             tools_schema=TOOLS_SCHEMA,
             tool_executor=executor,
+            client_config=client_config,
+            prefetched_data=prefetched_data,
         )
 
         # Filtra apenas ações de otimização (exclui consultas de dados)
