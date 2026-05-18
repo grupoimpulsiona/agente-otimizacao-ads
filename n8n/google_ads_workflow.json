@@ -66,8 +66,8 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: $('Analisar Google Ads').item.json.actions_text + '\\n\\n━━━━━━━━━━━━━━━━━━━\\n✅ Para APROVAR, clique:\\nhttps://n8n.impulsionatm.com.br/webhook/aprovar-google-ads?session_id=' + $('Analisar Google Ads').item.json.session_id + '\\n\\n❌ Para REJEITAR, ignore esta mensagem.' }) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify({ number: '120363423820098780@g.us', text: ($('Analisar Google Ads').item.json.actions_text || '⚠️ Sem ações para exibir') + '\\n\\n━━━━━━━━━━━━━━━━━━━\\n✅ Para APROVAR, clique:\\nhttps://n8n.impulsionatm.com.br/webhook/aprovar-google-ads?session_id=' + $('Analisar Google Ads').item.json.session_id + '\\n\\n❌ Para REJEITAR, ignore esta mensagem.' }) }}",
+        "options": { "timeout": 30000 }
       },
       "id": "gads-004",
       "name": "WhatsApp — Proposta",
@@ -106,8 +106,8 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Google Ads — Execução Concluída*\\n\\n📊 Contas: {{ $('Executar Ações').item.json.accounts.length }}\\n🚀 Modo: PRODUÇÃO\\n\\n_Otimizações aplicadas com sucesso!_\"\n}",
-        "options": {}
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Google Ads — Execução Concluída*\\n\\n📊 Contas: {{ ($('Executar Ações').item.json.accounts || []).length }}\\n🚀 Modo: PRODUÇÃO\\n\\n_Otimizações aplicadas com sucesso!_\"\n}",
+        "options": { "timeout": 30000 }
       },
       "id": "gads-007",
       "name": "WhatsApp — Confirmação",
@@ -136,8 +136,8 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA — Google Ads*\\n\\nErro: {{ $json.error.message }}\\nVerifique o N8N.\"\n}",
-        "options": {}
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA — Google Ads*\\n\\nErro: {{ ($json.error && $json.error.message) || $json.message || JSON.stringify($json).substring(0, 200) }}\\nVerifique o N8N.\"\n}",
+        "options": { "timeout": 30000 }
       },
       "id": "gads-009",
       "name": "WhatsApp — Erro",
@@ -169,7 +169,7 @@
   "settings": {
     "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all",
-    "executionTimeout": 660,
+    "executionTimeout": 900,
     "timezone": "America/Sao_Paulo"
   },
   "tags": ["ads", "google-ads", "automacao"]
