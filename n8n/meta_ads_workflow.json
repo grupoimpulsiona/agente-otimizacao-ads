@@ -21,7 +21,8 @@
     {
       "parameters": {
         "path": "aprovar-meta-ads",
-        "responseMode": "responseNode",
+        "responseMode": "onReceived",
+        "responseData": "noData",
         "options": {}
       },
       "id": "meta-002",
@@ -73,18 +74,6 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [760, 200]
-    },
-    {
-      "parameters": {
-        "respondWith": "text",
-        "responseBody": "✅ Aprovado! Executando as otimizações do Meta Ads. Você receberá uma confirmação no WhatsApp.",
-        "options": {}
-      },
-      "id": "meta-005",
-      "name": "Resposta HTTP",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [480, 420]
     },
     {
       "parameters": {
@@ -166,7 +155,6 @@
     },
     "Webhook Aprovação": {
       "main": [[
-        { "node": "Resposta HTTP", "type": "main", "index": 0 },
         { "node": "Executar Ações", "type": "main", "index": 0 }
       ]]
     },
