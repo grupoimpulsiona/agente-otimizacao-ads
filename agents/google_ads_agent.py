@@ -60,7 +60,7 @@ TOOLS_SCHEMA = [
             "properties": {
                 "customer_id": {"type": "string"},
                 "date_range": {"type": "string", "enum": ["LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS"]},
-                "min_impressions": {"type": "integer", "description": "Mínimo de impressões para retornar o termo", "default": 10},
+                "min_impressions": {"type": "integer", "description": "Mínimo de impressões para retornar o termo (padrão: 10)"},
             },
             "required": ["customer_id", "date_range"],
         },
@@ -106,7 +106,7 @@ TOOLS_SCHEMA = [
                 "customer_id": {"type": "string"},
                 "campaign_id": {"type": "string"},
                 "keyword_text": {"type": "string"},
-                "match_type": {"type": "string", "enum": ["EXACT", "PHRASE", "BROAD"], "default": "PHRASE"},
+                "match_type": {"type": "string", "enum": ["EXACT", "PHRASE", "BROAD"], "description": "Tipo de correspondência (padrão: PHRASE)"},
                 "reason": {"type": "string"},
             },
             "required": ["customer_id", "campaign_id", "keyword_text", "match_type", "reason"],

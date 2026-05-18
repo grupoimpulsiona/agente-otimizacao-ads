@@ -34,7 +34,7 @@ TOOLS_SCHEMA = [
             "type": "object",
             "properties": {
                 "ad_account_id": {"type": "string", "description": "ID da conta de anúncios (ex: act_123456)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "default": "last_7d"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
             },
             "required": ["ad_account_id", "date_preset"],
         },
@@ -47,7 +47,7 @@ TOOLS_SCHEMA = [
             "properties": {
                 "ad_account_id": {"type": "string"},
                 "campaign_id": {"type": "string", "description": "Filtrar por campanha (opcional)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "default": "last_7d"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
             },
             "required": ["ad_account_id", "date_preset"],
         },
@@ -60,7 +60,7 @@ TOOLS_SCHEMA = [
             "properties": {
                 "ad_account_id": {"type": "string"},
                 "ad_set_id": {"type": "string", "description": "Filtrar por ad set (opcional)"},
-                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "default": "last_7d"},
+                "date_preset": {"type": "string", "enum": ["last_7d", "last_14d", "last_30d"], "description": "Período de análise (padrão: last_7d)"},
             },
             "required": ["ad_account_id", "date_preset"],
         },
