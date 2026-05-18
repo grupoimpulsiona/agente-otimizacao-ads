@@ -1,17 +1,18 @@
 """
-Motor de decisão baseado em Claude com tool use.
+Motor de decisão baseado em Gemini com function calling.
 Recebe dados de performance e decide quais ações executar.
 """
 
 import json
 from typing import Any, Callable
-import anthropic
+import google.generativeai as genai
+from google.generativeai import types
 from config.settings import settings
 from utils.logger import get_logger
 
 log = get_logger("decision_engine")
 
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+genai.configure(api_key=settings.gemini_api_key)
 
 SYSTEM_GOOGLE_ADS = """Você é um especialista sênior em Google Ads com 10+ anos de experiência.
 Analise os dados de performance fornecidos e tome decisões de otimização cirúrgicas.
@@ -50,6 +51,20 @@ CRITÉRIOS DE AÇÃO:
 Ao final, forneça um resumo executivo das ações tomadas."""
 
 
+def _convert_tools_to_gemini(tools_schema: list[dict]) -> list:
+    """Converte tools do formato OpenAPI para o formato Gemini."""
+    function_declarations = []
+    for tool in tools_schema:
+        function_declarations.append(
+            types.FunctionDeclaration(
+                name=tool["name"],
+                description=tool["description"],
+                parameters=tool.get("input_schema", {}),
+            )
+        )
+    return [types.Tool(function_declarations=function_declarations)]
+
+
 def run_decision_loop(
     platform: str,
     performance_data: dict,
@@ -57,7 +72,7 @@ def run_decision_loop(
     tool_executor: Callable[[str, dict], Any],
 ) -> tuple[list[dict], str]:
     """
-    Loop agêntico principal.
+    Loop agêntico principal com Gemini.
     Retorna (lista_de_acoes_executadas, resumo_texto).
     """
     system = SYSTEM_GOOGLE_ADS if platform == "google_ads" else SYSTEM_META_ADS
@@ -72,73 +87,81 @@ def run_decision_loop(
         f"Dados de performance:\n{json.dumps(performance_data, ensure_ascii=False, indent=2)}"
     )
 
-    messages = [{"role": "user", "content": user_message}]
+    gemini_tools = _convert_tools_to_gemini(tools_schema)
+    model = genai.GenerativeModel(
+        model_name=settings.gemini_model,
+        system_instruction=system,
+        tools=gemini_tools,
+    )
+
+    chat = model.start_chat()
     actions_taken: list[dict] = []
     max_iterations = 20
+
+    response = chat.send_message(user_message)
 
     for iteration in range(max_iterations):
         log.info(f"[{platform}] Iteração {iteration + 1}/{max_iterations}")
 
-        response = client.messages.create(
-            model=settings.claude_model,
-            max_tokens=4096,
-            system=system,
-            tools=tools_schema,
-            messages=messages,
-        )
+        candidate = response.candidates[0]
+        finish_reason = candidate.finish_reason.name
+        log.info(f"[{platform}] finish_reason={finish_reason}")
 
-        log.info(f"[{platform}] stop_reason={response.stop_reason}")
+        # Coleta function calls desta resposta
+        function_calls = [
+            part.function_call
+            for part in candidate.content.parts
+            if hasattr(part, "function_call") and part.function_call and part.function_call.name
+        ]
 
-        if response.stop_reason == "end_turn":
-            summary = _extract_text(response.content)
+        if not function_calls:
+            summary = _extract_text(candidate.content.parts)
             log.info(f"[{platform}] Agente finalizou. Ações: {len(actions_taken)}")
             return actions_taken, summary
 
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
+        # Executa cada tool e coleta as respostas
+        tool_response_parts = []
+        for fc in function_calls:
+            tool_name = fc.name
+            tool_input = dict(fc.args)
 
-            log.info(f"[{platform}] Tool call: {block.name} | input={block.input}")
+            log.info(f"[{platform}] Tool call: {tool_name} | input={tool_input}")
 
             try:
-                result = tool_executor(block.name, block.input)
+                result = tool_executor(tool_name, tool_input)
                 actions_taken.append({
-                    "tool": block.name,
-                    "input": block.input,
+                    "tool": tool_name,
+                    "input": tool_input,
                     "result": result,
-                    "description": _describe_action(block.name, block.input, result),
+                    "description": _describe_action(tool_name, tool_input, result),
                 })
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result, ensure_ascii=False),
-                })
+                tool_response_parts.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=tool_name,
+                            response={"result": json.dumps(result, ensure_ascii=False)},
+                        )
+                    )
+                )
             except Exception as e:
-                log.error(f"[{platform}] Erro na tool {block.name}: {e}")
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": f"ERRO: {e}",
-                    "is_error": True,
-                })
+                log.error(f"[{platform}] Erro na tool {tool_name}: {e}")
+                tool_response_parts.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=tool_name,
+                            response={"error": str(e)},
+                        )
+                    )
+                )
 
-        clean_content = [
-            block for block in response.content
-            if not (hasattr(block, "text") and not block.text)
-        ]
-        if clean_content:
-            messages.append({"role": "assistant", "content": clean_content})
-
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
+        response = chat.send_message(tool_response_parts)
 
     log.warning(f"[{platform}] Limite de iterações atingido.")
     return actions_taken, "Limite de iterações atingido. Verifique os logs."
 
 
-def _extract_text(content: list) -> str:
-    return " ".join(b.text for b in content if hasattr(b, "text") and b.text)
+def _extract_text(parts) -> str:
+    return " ".join(part.text for part in parts if hasattr(part, "text") and part.text)
 
 
 def _describe_action(tool_name: str, inp: dict, result: Any) -> str:

@@ -28,27 +28,24 @@ title = lambda msg: print(f"\n{BOLD}{msg}{RESET}")
 errors = []
 
 
-def check_anthropic():
-    title("1. Anthropic (Claude)")
+def check_gemini():
+    title("1. Gemini AI")
     try:
-        import anthropic
+        import google.generativeai as genai
         from config.settings import settings
 
-        if not settings.anthropic_api_key or settings.anthropic_api_key.startswith("sk-ant-..."):
-            fail("ANTHROPIC_API_KEY não configurada")
-            errors.append("ANTHROPIC_API_KEY")
+        if not settings.gemini_api_key or settings.gemini_api_key == "sua_chave_gemini":
+            fail("GEMINI_API_KEY não configurada")
+            errors.append("GEMINI_API_KEY")
             return
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
-            model=settings.claude_model,
-            max_tokens=10,
-            messages=[{"role": "user", "content": "ping"}],
-        )
-        ok(f"API funcionando | modelo={settings.claude_model}")
+        genai.configure(api_key=settings.gemini_api_key)
+        model = genai.GenerativeModel(model_name=settings.gemini_model)
+        response = model.generate_content("ping")
+        ok(f"API funcionando | modelo={settings.gemini_model}")
     except Exception as e:
         fail(f"Erro: {e}")
-        errors.append("Anthropic API")
+        errors.append("Gemini API")
 
 
 def check_google_ads():
@@ -182,7 +179,7 @@ if __name__ == "__main__":
     print(f"{'='*50}{RESET}")
 
     check_env_file()
-    check_anthropic()
+    check_gemini()
     check_google_ads()
     check_meta()
     check_evolution()
