@@ -7,6 +7,7 @@ import json
 from typing import Any, Callable
 import google.generativeai as genai
 from google.generativeai import types
+import google.ai.generativelanguage as glm
 from config.settings import settings
 from utils.logger import get_logger
 
@@ -136,8 +137,8 @@ def run_decision_loop(
                     "description": _describe_action(tool_name, tool_input, result),
                 })
                 tool_response_parts.append(
-                    types.Part(
-                        function_response=types.FunctionResponse(
+                    glm.Part(
+                        function_response=glm.FunctionResponse(
                             name=tool_name,
                             response={"result": json.dumps(result, ensure_ascii=False)},
                         )
@@ -146,8 +147,8 @@ def run_decision_loop(
             except Exception as e:
                 log.error(f"[{platform}] Erro na tool {tool_name}: {e}")
                 tool_response_parts.append(
-                    types.Part(
-                        function_response=types.FunctionResponse(
+                    glm.Part(
+                        function_response=glm.FunctionResponse(
                             name=tool_name,
                             response={"error": str(e)},
                         )
