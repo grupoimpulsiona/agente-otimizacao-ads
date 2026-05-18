@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Gemini AI
     gemini_api_key: str
@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     evolution_api_key: str = ""           # apikey da instância
     evolution_instance: str = ""          # nome da instância
     evolution_group_jid: str = "120363423820098780@g.us"  # grupo de notificações
+
+    # Segurança da API
+    api_secret: str = "trocar-em-producao"
 
     # Guardrails
     max_bid_change_pct: float = 0.20
