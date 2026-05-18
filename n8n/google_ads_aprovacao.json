@@ -1,43 +1,48 @@
 {
-  "name": "Google Ads — 1. Analisar e Propor",
+  "name": "Google Ads — 2. Aprovar e Executar",
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 7 * * 1-5"
-            }
-          ]
-        }
+        "path": "aprovar-google-ads",
+        "responseMode": "responseNode",
+        "options": {}
       },
-      "id": "gads-a-001",
-      "name": "Trigger 7h (Seg-Sex)",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [200, 300]
+      "id": "gads-b-001",
+      "name": "Webhook Aprovação",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "aprovar-google-ads"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "✅ Aprovado! As ações do Google Ads estão sendo executadas. Você receberá uma confirmação no WhatsApp em breve.",
+        "options": {}
+      },
+      "id": "gads-b-002",
+      "name": "Resposta HTTP",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [440, 180]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://31.97.170.137:8000/analyze/google-ads",
+        "url": "=http://31.97.170.137:8000/execute/{{ $('Webhook Aprovação').item.json.query.session_id }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "x-api-key", "value": "impulsiona-agente-ads-2026-seguro" }
           ]
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{ \"date_range\": \"LAST_7_DAYS\" }",
         "options": { "timeout": 600000 }
       },
-      "id": "gads-a-002",
-      "name": "Analisar Google Ads",
+      "id": "gads-b-003",
+      "name": "Executar Ações",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 300]
+      "position": [440, 380]
     },
     {
       "parameters": {
@@ -52,18 +57,18 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"{{ $('Analisar Google Ads').item.json.actions_text }}\\n\\n━━━━━━━━━━━━━━━━━━━\\n✅ *Para APROVAR e executar, clique:*\\nhttps://n8n.impulsionatm.com.br/webhook/aprovar-google-ads?session_id={{ $('Analisar Google Ads').item.json.session_id }}\\n\\n❌ *Para REJEITAR, ignore esta mensagem.*\\n⏱ O link expira quando o container reiniciar.\"\n}",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"✅ *Google Ads — Execução Concluída*\\n\\n📊 Contas processadas: {{ $('Executar Ações').item.json.accounts.length }}\\n🚀 Modo: PRODUÇÃO\\n\\n_As otimizações foram aplicadas com sucesso!_\"\n}",
         "options": {}
       },
-      "id": "gads-a-003",
-      "name": "WhatsApp — Proposta",
+      "id": "gads-b-004",
+      "name": "WhatsApp — Confirmação",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300]
+      "position": [680, 380]
     },
     {
       "parameters": {},
-      "id": "gads-a-004",
+      "id": "gads-b-005",
       "name": "Error Trigger Global",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
@@ -82,10 +87,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA — Google Ads Análise*\\n\\nErro: {{ $json.error.message }}\\nVerifique o N8N.\"\n}",
+        "jsonBody": "={\n  \"number\": \"120363423820098780@g.us\",\n  \"text\": \"🚨 *FALHA — Google Ads Execução*\\n\\nErro: {{ $json.error.message }}\\nVerifique o N8N.\"\n}",
         "options": {}
       },
-      "id": "gads-a-005",
+      "id": "gads-b-006",
       "name": "WhatsApp — Erro",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -93,11 +98,16 @@
     }
   ],
   "connections": {
-    "Trigger 7h (Seg-Sex)": {
-      "main": [[{ "node": "Analisar Google Ads", "type": "main", "index": 0 }]]
+    "Webhook Aprovação": {
+      "main": [
+        [
+          { "node": "Resposta HTTP", "type": "main", "index": 0 },
+          { "node": "Executar Ações", "type": "main", "index": 0 }
+        ]
+      ]
     },
-    "Analisar Google Ads": {
-      "main": [[{ "node": "WhatsApp — Proposta", "type": "main", "index": 0 }]]
+    "Executar Ações": {
+      "main": [[{ "node": "WhatsApp — Confirmação", "type": "main", "index": 0 }]]
     },
     "Error Trigger Global": {
       "main": [[{ "node": "WhatsApp — Erro", "type": "main", "index": 0 }]]
